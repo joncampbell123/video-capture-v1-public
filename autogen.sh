@@ -63,6 +63,11 @@ pkg_exists alsa || exit 1
 ver=`pkg-config alsa --modversion`
 echo "  Version $ver"
 
+# Simple DirectMedia Library 1.x
+pkg_exists sdl || exit 1
+ver=`pkg-config sdl --modversion`
+echo "  Version $ver"
+
 # FFMPEG libavcodec (tested with 2.5.4)
 pkg_exists libavcodec || exit 1
 ver=`pkg-config libavcodec --modversion`
