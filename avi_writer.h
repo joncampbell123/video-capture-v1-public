@@ -1,7 +1,8 @@
 #ifndef __ISP_UTILS_AVI_WRITER_H
 #define __ISP_UTILS_AVI_WRITER_H
 
-#include <isp-utils-v4/avi/avi.h>
+#include "riff.h"
+#include "avi.h"
 
 #ifdef __cplusplus
 extern "C" {

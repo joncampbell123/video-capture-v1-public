@@ -6,6 +6,8 @@
  * processors.
  */
 
+#include <stdint.h>
+
 #ifndef __VIDEOCAP_VIDEOCAP_RAWINT_H
 #define __VIDEOCAP_VIDEOCAP_RAWINT_H
 

@@ -9,7 +9,7 @@
 #include <string.h>
 #include <stdio.h>
 
-#include <isp-utils-v4/misc/informational.h>
+#include "informational.h"
 
 #ifdef __cplusplus
 extern "C" {

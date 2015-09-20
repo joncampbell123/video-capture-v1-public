@@ -3,9 +3,9 @@
  * Alternate copy for open source videocap project.
  */
 
-#include <isp-utils-v4/misc/rawint.h>
-#include <isp-utils-v4/avi/avi_reader.h>
-#include <isp-utils-v4/avi/avi_rw_iobuf.h>
+#include "rawint.h"
+#include "avi_reader.h"
+#include "avi_rw_iobuf.h"
 #include <assert.h>
 #include <stdlib.h>
 #include <unistd.h>
