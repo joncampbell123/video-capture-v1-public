@@ -18,7 +18,6 @@
  */
 
 #include "unicode.h"
-#include "string_buffer.h"
 
 /* [doc] utf8_encode
  *

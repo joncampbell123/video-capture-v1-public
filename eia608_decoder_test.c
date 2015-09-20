@@ -41,9 +41,7 @@ struct v4l2_mmap_tracking {
 static int					DIE = 0;
 static int					cc2 = 0;
 static int					even = 0;
-static int					is_dv = 0;
 static int					do_xds = 0;
-static int					is_m2v = 0;
 static int					is_scc = 0;
 static int					do_text = 0;
 static int					rawtext = 0;
@@ -101,7 +99,6 @@ static void help() {
 	fprintf(stderr,"    -scc                      Input file is a SCC file\n");
 	fprintf(stderr,"    -line21[=scan width]      Input file is a raw analog capture of Line 21\n");
 	fprintf(stderr,"    -v4l-vbi[=width]          Input file is Video4Linux2 VBI capture device\n");
-	fprintf(stderr,"    -m2v                      Input file is a raw MPEG video stream\n");
 	fprintf(stderr,"    -jumbled-cc1-cc2          The M2V/MPEG input forgot to set odd or even field number\n");
 	fprintf(stderr,"                              in the CC data, thus CC1/CC2 are jumbled together. If\n");
 	fprintf(stderr,"                              closed captions are garbled, play slowly, or pop-on CCs\n");
@@ -115,7 +112,6 @@ static void help() {
 	fprintf(stderr,"    -mpg-dvd                  Assume data is in MPEG CC user packets (DVD-style CC data)\n");
 	fprintf(stderr,"    -mpg-atsc                 Assume data is in MPEG ATSC user packets (EIA-708 carrying EIA-608)\n");
 	fprintf(stderr,"    -p60                      Emulate 60fps progressive\n");
-	fprintf(stderr,"    -dv                       Input file is raw DV\n");
 	fprintf(stderr,"    -eia608-thr               EIA-608 debugging: show Line21 analog through threshhold\n");
 	fprintf(stderr,"    -eia608-state             EIA-608 debugging: show Line21 analog state\n");
 	fprintf(stderr,"    -line21on=N               v4l-vbi input: read scan line N instead of Line 21\n");
@@ -861,13 +857,11 @@ void v4l_video_take(unsigned char *src) {
 }
 
 int main(int argc,char **argv) {
-	mpeg12_pes_assembly_buffer *m2v = NULL;
 	unsigned long long file_offset = 0;
 	unsigned long long SCR = 0ULL;
 	sliding_window_v4 *wnd = NULL;
 	unsigned char tgt_field = 0;
 	unsigned int cc_field = 0;
-	mpeg_pes *pes = NULL;
 	char *path = NULL;
 	int fd,rd,i,sw=0;
 	int eof;
@@ -897,9 +891,6 @@ int main(int argc,char **argv) {
 			}
 			else if (!strcmp(p,"eia608-state")) {
 				eia608_debug_state = 1;
-			}
-			else if (!strcmp(p,"m2v")) {
-				is_m2v = 1;
 			}
 			else if (!strcmp(p,"line21")) {
 				is_line21 = 756;
@@ -931,9 +922,6 @@ int main(int argc,char **argv) {
 			}
 			else if (!strcmp(p,"cc2")) {
 				cc2 = 1;
-			}
-			else if (!strcmp(p,"dv")) {
-				is_dv = 1;
 			}
 			else if (!strcmp(p,"scc")) {
 				is_scc = 1;
@@ -1006,7 +994,7 @@ int main(int argc,char **argv) {
 			return 1;
 		}
 
-		if (!is_m2v && !is_dv && is_v4l_vbi <= 0 && !is_line21 && !is_scc && !rawinput) {
+		if (is_v4l_vbi <= 0 && !is_line21 && !is_scc && !rawinput) {
 			struct stat st;
 
 			if (fstat(fd,&st) == 0) {
@@ -1050,16 +1038,6 @@ int main(int argc,char **argv) {
 	if ((wnd = sliding_window_v4_create_buffer(1024*1024)) == NULL) {
 		fprintf(stderr,"Cannot create sliding window\n");
 		return 1;
-	}
-	if ((pes = mpeg_pes_create()) == NULL) {
-		fprintf(stderr,"Cannot create PES scanner\n");
-		return 1;
-	}
-	if (!is_m2v) {
-		if ((m2v = mpeg12_pes_assembly_create(1*1024*1024)) == NULL) {
-			fprintf(stderr,"Cannot alloc asm buf\n");
-			return 1;
-		}
 	}
 	if ((eia608_cc = eia608_decoder_create()) == NULL) {
 		fprintf(stderr,"Cannot alloc CC decoder\n");
@@ -1112,60 +1090,6 @@ int main(int argc,char **argv) {
 			signed long long cc = (signed long long)((unsigned int)rand() & 0xFFFF);
 			emit_cc((uint16_t)cc);
 		}
-	}
-	else if (is_dv) {
-		signed long long current_frame=0;
-		struct dv_dif_info dinfo;
-		signed long ccword=-1LL;
-
-		show_video = 0;
-
-		do {
-			if (DIE) break;
-
-			assert(sliding_window_v4_is_sane(wnd));
-			file_offset += (unsigned long long)sliding_window_v4_lazy_flush(wnd);
-			eof = (sliding_window_v4_can_write(wnd) > 0 && sliding_window_v4_refill_from_fd(wnd,fd,0) <= 0);
-			pes->src_eof = eof;
-
-			assert(sliding_window_v4_is_sane(wnd));
-			while (sliding_window_v4_data_available(wnd) >= (size_t)80) {
-				if (dv_get_dif_header(wnd->data,&dinfo)) {
-					if (dinfo.SCT == 0/*header*/ && dinfo.Dseq == 0 && dinfo.DBN == 0) {
-						if (current_frame >= 0LL) {
-							if (ccword >= 0L) {
-								emit_cc((uint16_t)ccword);
-							}
-							else {
-								if (raw) fprintf(stderr,"No data\n");
-								emit_cc(0x8080);
-							}
-						}
-
-						current_frame++;
-						ccword = -1L;
-					}
-					else if (dinfo.SCT == 2/*VAUX*/) {
-						unsigned char *scan = wnd->data+3;
-						unsigned char *fence = wnd->data+78;
-
-						while ((scan+5) <= fence) {
-							if (scan[0] == 0x65/*VAUX CC*/) {
-								if (ccword < 0L) ccword = __be_u16(scan+(even?3:1));
-							}
-
-							scan += 5;
-						}
-					}
-				}
-
-				wnd->data += (size_t)80;
-				if (DIE) break;
-			}
-
-			file_offset += (unsigned long long)sliding_window_v4_lazy_flush(wnd);
-			eof = (sliding_window_v4_can_write(wnd) > 0 && sliding_window_v4_refill_from_fd(wnd,fd,0) <= 0);
-		} while (sliding_window_v4_data_available(wnd) >= (size_t)80 || !eof);
 	}
 	else if (is_v4l_vbi > 0) {
 		struct v4l2_mmap_tracking *vidmap = NULL;
@@ -1568,7 +1492,6 @@ int main(int argc,char **argv) {
 			assert(sliding_window_v4_is_sane(wnd));
 			file_offset += (unsigned long long)sliding_window_v4_lazy_flush(wnd);
 			eof = (sliding_window_v4_can_write(wnd) > 0 && sliding_window_v4_refill_from_fd(wnd,fd,0) <= 0);
-			pes->src_eof = eof;
 
 			assert(sliding_window_v4_is_sane(wnd));
 			while (sliding_window_v4_data_available(wnd) >= (size_t)is_line21) {
@@ -1604,7 +1527,6 @@ int main(int argc,char **argv) {
 			assert(sliding_window_v4_is_sane(wnd));
 			file_offset += (unsigned long long)sliding_window_v4_lazy_flush(wnd);
 			eof = (sliding_window_v4_can_write(wnd) > 0 && sliding_window_v4_refill_from_fd(wnd,fd,0) <= 0);
-			pes->src_eof = eof;
 
 			assert(sliding_window_v4_is_sane(wnd));
 			while (sliding_window_v4_data_available(wnd) >= (eof ? 1 : 4096)) {
@@ -1630,7 +1552,6 @@ int main(int argc,char **argv) {
 			assert(sliding_window_v4_is_sane(wnd));
 			file_offset += (unsigned long long)sliding_window_v4_lazy_flush(wnd);
 			eof = (sliding_window_v4_can_write(wnd) > 0 && sliding_window_v4_refill_from_fd(wnd,fd,0) <= 0);
-			pes->src_eof = eof;
 
 			assert(sliding_window_v4_is_sane(wnd));
 			while (sliding_window_v4_data_available(wnd) >= 2) {
@@ -1643,287 +1564,8 @@ int main(int argc,char **argv) {
 			eof = (sliding_window_v4_can_write(wnd) > 0 && sliding_window_v4_refill_from_fd(wnd,fd,0) <= 0);
 		} while (sliding_window_v4_data_available(wnd) >= 2 || !eof);
 	}
-	else if (is_m2v) {
-		show_video = 0;
-
-		/* REMOVED: The loop below should have alternate code to direct-fill the window from the file.
-		 *          We don't need duplicate code for M2V and PES */
-	}
 	else {
-		uint16_t cc1_cc2[120]={0}; /* up to 120 frame gop */
-		uint16_t cc3_cc4[120]={0}; /* up to 120 frame gop */
-		unsigned int current_temp_frame = 0,max_temp_frame = 0;
-
-		show_video = 0;
-
-		do {
-			if (DIE) break;
-
-			file_offset += (unsigned long long)sliding_window_v4_lazy_flush(wnd);
-			eof = (sliding_window_v4_can_write(wnd) > 0 && sliding_window_v4_refill_from_fd(wnd,fd,0) <= 0);
-			pes->src_eof = eof;
-
-			assert(mpeg12_pes_assembly_is_sane(m2v));
-			while (mpeg12_pes_assembly_data_available(m2v) > (256*1024) || eof) {
-				const unsigned char *scan;
-				unsigned long long fofs;
-				size_t len = mpeg12_pes_assembly_data_available(m2v);
-				const unsigned char *ptr = mpeg12_pes_assembly_data_ptr(m2v);
-				const unsigned char *fence = mpeg12_pes_assembly_data_end(m2v);
-				const unsigned char *afence = mpeg12_pes_assembly_data_end(m2v);
-				const unsigned char *eop;
-
-				if (DIE) break;
-
-				/* proof of concept: scan the video bitstream for start codes
-				 * and use the API to convert the buffer offset to file offset. */
-				if (len == 0) break;
-				assert(ptr != NULL);
-				if (!eof) fence -= 65536; /* maintain a minimum 64KB at all times unless EOF */
-				if (fence < ptr) fence = ptr;
-				for (scan=ptr;(scan+8) <= fence;scan++) {
-					/* to verify the data matches as opposed to start codes that happen to match
-					 * we compare a lot of data */
-					uint32_t code;
-
-					if (DIE) break;
-
-					code = __be_u32(scan);
-					if ((code&0xFFFFFF00) != 0x00000100) continue;
-
-					if (code == 0x00000100) { /* picture start */
-						mpeg_video_picture_header hdr;
-
-						if (mpeg_video_decode_picture_header(scan,afence,&hdr)) {
-							scan += 4;
-							current_temp_frame = hdr.temporal_reference;
-							if (max_temp_frame <= current_temp_frame) max_temp_frame = current_temp_frame+1;
-							if (max_temp_frame > 120) max_temp_frame = 120;
-						}
-					}
-					else if (code == 0x000001B8 || code == 0x000001B3) {
-						if (max_temp_frame != 0) {
-							uint16_t *row = even ? cc3_cc4 : cc1_cc2;
-							unsigned int wrd;
-
-							for (wrd=0;wrd < max_temp_frame;wrd++) {
-								if (row[wrd] != 0)
-									emit_cc(row[wrd]);
-								else
-									emit_cc(0x8080);
-							}
-
-							max_temp_frame = current_temp_frame = 0;
-							memset(cc1_cc2,0,sizeof(cc1_cc2));
-							memset(cc3_cc4,0,sizeof(cc3_cc4));
-						}
-					}
-
-					if (code != 0x000001B2) continue;
-					scan += 4; /* skip start code */
-					assert(scan <= fence);
-
-					if ((mpeg_mode == MM_AUTO || mpeg_mode == MM_ATSC) && __be_u32(scan) == 0x47413934/*"GA94"*/) { /* CEA-708 CC data */
-						if (mpeg_mode != MM_ATSC && verbose)
-							fprintf(stderr,"Sticking to ATSC MPEG mode\n");
-						mpeg_mode = MM_ATSC;
-						scan += 4;
-
-						/* print the start code and corresponding file offset(s) */
-						fofs = mpeg12_pes_assembly_data_to_file_offset(m2v,scan-8,&eop);
-						if (verbose) fprintf(stdout,"CEA-708 CC @%llu\n",(unsigned long long)fofs);
-
-						/* +0     0x000001B2
-						 * +4     0x47413934 "GA94"
-						 * +8     user_data_type_code      0x03
-						 * ------------------------------------
-						 * +9     [7:7] process_em_data_flag
-						 *        [6:6] process_cc_data_flag
-						 *        [5:5] additional_data_flag
-						 *        [4:0] cc_count
-						 * +10    em_data
-						 * +11    CC_data                  count x 3-byte entries */
-						if (scan[0] == 0x03) {
-							scan++;
-							if (*scan & 0x40) { /* if process_cc_data_flag != 0 */
-								unsigned char count,cc,field;
-
-								count = *scan & 0x1F; scan++; /* skip cc_count */
-								scan++; /* skip em_data */
-								for (cc=0;cc < count;cc++,scan += 3) {
-									if ((scan[0] & 0xF8) != 0xF8)
-										continue;
-
-									field = scan[0] & 3;
-									if (field >= 2) {
-										if (scan[0]&4) {
-											if (verbose) {
-												fprintf(stderr,"DTVCC data present: code=%u %02x%02x '%c%c'\n",
-													field,scan[1],scan[2],
-													scan[1] >= 32 ? scan[1] : '.',
-													scan[2] >= 32 ? scan[2] : '.');
-											}
-											else {
-												static unsigned char warn=1;
-
-												if (warn) {
-													fprintf(stderr,"NOTICE: There is actual DTVCC data in this stream as well.\n");
-													warn=0;
-												}
-											}
-										}
-										continue;
-									}
-
-									if (field == tgt_field) {
-										if (scan[0] & 4) {
-											if (current_temp_frame < 120) {
-												uint16_t *row = even ? cc3_cc4 : cc1_cc2;
-
-												if (row[current_temp_frame] == 0)
-													row[current_temp_frame] =
-														((unsigned int)scan[1] << 8) |
-														(unsigned int)scan[2];
-												else if (verbose)
-													fprintf(stderr,"WARNING: More than one CC word in packet\n");
-											}
-										}
-									}
-								}
-							}
-						}
-						else if (scan[0] == 0x06) {
-							if (verbose)
-								fprintf(stderr,"TODO: CEA-708 ATSC BAR data\n");
-						}
-						else {
-							fprintf(stdout,"  Unknown data type code 0x%02x\n",scan[0]);
-						}
-					}
-					else if ((mpeg_mode == MM_AUTO || mpeg_mode == MM_DVD) && __be_u16(scan) == 0x4343/*"CC"*/) { /* EIA-608 CC packet */
-						if (mpeg_mode != MM_DVD && verbose)
-							fprintf(stderr,"Sticking to DVD MPEG mode\n");
-						mpeg_mode = MM_DVD;
-						scan += 2;
-
-						/* print the start code and corresponding file offset(s) */
-						fofs = mpeg12_pes_assembly_data_to_file_offset(m2v,scan-6,&eop);
-						if (verbose) fprintf(stdout,"EIA-608 CC @%llu\n",(unsigned long long)fofs);
-
-						/* +0     0x000001B2
-						 * +4     0x4343 "CC"
-						 * +6     user_data_type_code      0x01
-						 * ------------------------------------
-						 * +7     caption_block_size       inverted uimsbf
-						 * +8     caption_block_count      odd parity uimsbf
-						 * +9     CC data                  count x 3-byte entries */
-						if (scan[0] == 0x01) {
-							unsigned char count,size,cc;
-
-							/* FIXME: Is this right? If scan[2]&0x40, the first word is even field?
-							 * Seems to work for '1 (800) 883-5643 [WEIRD EIA-608 CC DATA].mpg'.
-							 *
-							 * What about the 'dodgeball' sample, where bit 7 is set? what does that mean? */
-							if (scan[2] & 0x40) cc_field = 1;
-
-							count = scan[2] & 0x3F;
-							size = scan[1] ^ 0xFF;
-							if (verbose) fprintf(stdout,"  CC data count=%u [%02x] size=%u [%02x]\n",count,scan[2],size,scan[1]);
-							scan += 3;
-
-							for (cc=0;cc < count;cc++) {
-								unsigned char field,cc1,cc2;
-
-								if ((scan+3) > afence) break;
-
-								/* Some DVDs are mis-authored with the field value
-								 * ALWAYS set to 0xFF (odd field) even when actually
-								 * transmitting CC2 */
-								if (mpeg_jumbled_CC1_CC2) {
-									/* NTS: using cc & 1 is NOT a viable way to separate out
-									 * the CC words. "Dodgeball" test VOB fails to decode properly
-									 * doing that. This swapping is the ONLY way to get the
-									 * data to decode properly */
-									field = cc_field ^ (mpeg_jumbled_CC1_CC2_backwards ? 1 : 0);
-									cc_field ^= 1;
-								}
-								else
-									field = scan[0] ^ 0xFF;
-
-								cc1 = scan[1];
-								cc2 = scan[2];
-								if (verbose) fprintf(stdout,"  Field #%d %02x %02x\n",field,cc1,cc2);
-								if (field > 1) fprintf(stdout,"  * WARNING: Strange field number %d\n",field);
-								if (((cc1&0x80) != 0 && u8_parity(cc1) == 0) ||
-									((cc2&0x80) != 0 && u8_parity(cc2) == 0)) {
-									fprintf(stdout,"  * WARNING: parity error on data %02x %02x\n",cc1,cc2);
-									cc1 &= 0x7F; if (u8_parity(cc1) == 0) cc1 |= 0x80;
-									cc2 &= 0x7F; if (u8_parity(cc2) == 0) cc2 |= 0x80;
-								}
-
-								if (field == tgt_field)
-									emit_cc(((unsigned int)cc1 << 8) + ((unsigned int)cc2));
-
-								scan += 3;
-							}
-
-							scan--;
-						}
-						else {
-							fprintf(stdout,"  Unknown data type code 0x%02x\n",scan[0]);
-						}
-					}
-				}
-
-				if (eof) scan = fence;
-				len = (size_t)(scan - ptr);
-				assert(mpeg12_pes_assembly_data_discard(m2v,len,ASMDISCARD_LAZY) == len);
-				assert(mpeg12_pes_assembly_is_sane(m2v));
-			}
-
-			wnd->data = (unsigned char*)mpeg_pes_scan(pes,wnd->data,wnd->end);
-
-			assert(sliding_window_v4_is_sane(wnd));
-			if (!pes->pkt_need_more && pes->pkt_code != 0) {
-				if (pes->pkt_code == 0x000001BA) {
-					unsigned long long newscr = mpeg_pes_pack_header_decode(pes,pes->pkt_payload,wnd->end);
-					if (newscr != (~0ULL)) SCR = newscr;
-
-					pes->pkt_end = pes->pkt_payload + 4;
-					while ((pes->pkt_end+4) < wnd->end) {
-						uint32_t code = __be_u32(pes->pkt_end);
-						if ((code&0xFFFFFF00) != 0x00000100) {
-							pes->pkt_end++;
-							continue;
-						}
-						if (code <= 0x000001B9) {
-							pes->pkt_end++;
-							continue;
-						}
-						break;
-					}
-					assert(pes->pkt_end >= pes->pkt_start);
-					wnd->data = (unsigned char*)pes->pkt_end;
-				}
-				else if (pes->pkt_code == 0x000001E0) {
-					if (pes->pkt_end == NULL && pes->pkt_start != NULL && pes->pkt_payload != NULL)
-						fprintf(stderr,"WARNING: PES packets with length==0 not supported\n");
-
-					if (pes->pkt_start != NULL && pes->pkt_end != NULL && pes->pkt_start < pes->pkt_end) {
-						if (!mpeg12_pes_assembly_add_pes(m2v,pes,SCR,file_offset + ((size_t)(pes->pkt_start - wnd->buffer))))
-							fprintf(stderr,"Failed to add PES packet\n");
-					}
-				}
-			}
-			else if (pes->pkt_need_more && eof) {
-				/* well... too bad */
-				wnd->data = wnd->end;
-			}
-
-			file_offset += (unsigned long long)sliding_window_v4_lazy_flush(wnd);
-			eof = (sliding_window_v4_can_write(wnd) > 0 && sliding_window_v4_refill_from_fd(wnd,fd,0) <= 0);
-			assert(mpeg12_pes_assembly_is_sane(m2v));
-		} while (sliding_window_v4_data_available(wnd) > MPEG_PES_SCAN_MINIMUM || mpeg12_pes_assembly_data_available(m2v) > 4 || !eof);
+		fprintf(stderr,"Unsupported mode\n");
 	}
 
 	video_surface_SDL=NULL;
@@ -1932,9 +1574,7 @@ int main(int argc,char **argv) {
 	scc_reader = scc_eia608_reader_destroy(scc_reader);
 	eia608_cc = eia608_decoder_destroy(eia608_cc);
 	xds_asm = xds_data_assembly_destroy(xds_asm);
-	m2v = mpeg12_pes_assembly_destroy(m2v);
 	wnd = sliding_window_v4_destroy(wnd);
-	pes = mpeg_pes_destroy(pes);
 	if (fd >= 0) close(fd);
 	return 0;
 }
