@@ -136,8 +136,7 @@ static void help() {
 	fprintf(stderr,"   an MPEG program stream.\n");
 	fprintf(stderr,"\n");
 	fprintf(stderr,"   Read EIA-608 Closed Caption data and simulate the decoding process on-screen.\n");
-	fprintf(stderr,"   (C) 2012-2013 Impact Studio Pro/Castus corporation.\n");
-	fprintf(stderr,"   Written by Jonathan Campbell.\n");
+	fprintf(stderr,"   (C) 2012-2015 Jonathan Campbell, for video capture project.\n");
 }
 
 static void sigma(int __attribute__((unused)) x) {
