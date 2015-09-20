@@ -292,6 +292,111 @@ static void on_cc_update_screen(void __attribute__((unused)) *ctx,unsigned char 
 	if (!show_video) redraw_cc(xstart,ystart,xend,yend);
 }
 
+static const char *xds_program_type(unsigned char code) {
+	switch (code) {
+		case 0x20:	return "Education";
+		case 0x21:	return "Entertainment";
+#if 0
+0xa2	Movie
+0x23	News
+0xa4	Religious
+0x25	Sports
+0x26	Other
+0xa7	Action
+0xa8	Advertisement
+0x29	Animated
+0x2a	Anthology
+0xab	Automobile
+0x2c	Awards
+0xad	Baseball
+0xae	Basketball
+0x2f	Bulletin
+0xb0	Business
+0x31	Classical
+0x32	College
+0xb3	Combat
+0x34	Comedy
+0xb5	Commentary
+0xb6	Concert
+0x37	Consumer
+0x38	Contemporary
+0xb9	Crime
+0xba	Dance
+0x3b	Documentary
+0xbc	Drama
+0x3d	Elementary
+0x3e	Erotica
+0xbf	Exercise
+0x40	Fantasy
+0xc1	Farm
+0xc2	Fashion
+0x43	Fiction
+0xc4	Food
+0x45	Football
+0x46	Foreign
+0xc7	Fund-Raiser
+0xc8	Game/Quiz
+0x49	Garden
+0x4a	Golf
+0xcb	Government
+0x4c	Health
+0xcd	High_School
+0xce	History
+0x4f	Hobby
+0xd0	Hockey
+0x51	Home
+0x52	Horror
+0xd3	Information
+0x54	Instruction
+0xd5	International
+0xd6	Interview
+0x57	Language
+0x58	Legal
+0xd9	Live
+0xda	Local
+0x5b	Math
+0xdc	Medical
+0x5d	Meeting
+0x5e	Military
+0xdf	Mini-Series
+0xe0	Music
+0x61	Mystery
+0x62	National
+0xe3	Nature
+0x64	Police
+0xe5	Politics
+0xe6	Premiere
+0x67	Pre-Recorded
+0x68	Product
+0xe9	Professional
+0xea	Public
+0x6b	Racing
+0xec	Reading
+0x6d	Repair
+0x6e	Repeat
+0xef	Review
+0x70	Romance
+0xf1	Science
+0xf2	Series
+0x73	Service
+0xf4	Shopping
+0x75	Soap_Opera
+0x76	Special
+0xf7	Suspense
+0xf8	Talk
+0x79	Technical
+0x7a	Tennis
+0xfb	Travel
+0x7c	Variety
+0xfd	Video
+0xfe	Weather
+0x7f	Western
+#endif
+	};
+
+	return "?";
+}
+
 static void on_xds_packet(void __attribute__((unused)) *ctx,xds_data_stream *s) {
 	char tmp[256];
 
@@ -414,6 +519,14 @@ static void on_xds_packet(void __attribute__((unused)) *ctx,xds_data_stream *s) 
 					((unsigned char)s->data[4])-0x40,
 					(s->data_length > 6) ? 
 						((unsigned char)s->data[6])-0x40 : 0x00);
+			}
+		}
+		else if (s->typeno == 4) { /* Program Type(s) */
+			if (s->data_length >= sizeof(tmp))
+				s->data_length = sizeof(tmp)-1;
+			if (s->data_length >= 3) {
+				fprintf(stdout,"XDS: Program Type: %02x = %s\n",
+					s->data[2],xds_program_type(s->data[2]));
 			}
 		}
 		else if (s->typeno == 5) { /* program rating (V-chip) */
