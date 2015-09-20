@@ -63,6 +63,16 @@ pkg_exists alsa || exit 1
 ver=`pkg-config alsa --modversion`
 echo "  Version $ver"
 
+# FFMPEG libavcodec (tested with 2.5.4)
+pkg_exists libavcodec || exit 1
+ver=`pkg-config libavcodec --modversion`
+echo "  Version $ver"
+
+# FFMPEG libavutil (tested with 2.5.4)
+pkg_exists libavutil || exit 1
+ver=`pkg-config libavutil --modversion`
+echo "  Version $ver"
+
 # OK do it
 echo >NEWS
 echo >AUTHORS
