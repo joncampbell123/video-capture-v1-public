@@ -43,16 +43,24 @@ pkg_exists gtk+-2.0 || exit 1
 ver=`pkg-config gtk+-2.0 --modversion`
 echo "  Version $ver"
 
+# GLIB
 pkg_exists glib-2.0 || exit 1
 ver=`pkg-config glib-2.0 --modversion`
 echo "  Version $ver"
 
+# Pango
 pkg_exists pango || exit 1
 ver=`pkg-config pango --modversion`
 echo "  Version $ver"
 
+# ATK
 pkg_exists atk || exit 1
 ver=`pkg-config atk --modversion`
+echo "  Version $ver"
+
+# ALSA sound library
+pkg_exists alsa || exit 1
+ver=`pkg-config alsa --modversion`
 echo "  Version $ver"
 
 # OK do it
