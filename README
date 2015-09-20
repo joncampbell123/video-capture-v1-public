@@ -9,6 +9,8 @@ Runtime requirements:
  - X-Windows (XFree86 or X.org) with SHM and Xv extension libraries
  - GTK+ 2.23 or higher
  - Glib, pango, freetype
+ - FFMPEG 2.5.x or higher
+ - FFMPEG must have been compiled with support for libx264 (open source H.264 encoder)
 
 Also recommended:
 
