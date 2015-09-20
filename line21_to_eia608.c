@@ -148,7 +148,7 @@ int main(int argc,char **argv) {
 					H = (unsigned int)((cnv / 60ULL) / 60ULL);
 					F = (unsigned int)(((scan_counter * 1001ULL) % 30000ULL) / 1000ULL);
 
-					sprintf(tmp,"%02u:%02u:%02u:%02u\t",H,M,S,F);
+					sprintf(tmp,"%02u:%02u:%02u;%02u\t",H,M,S,F);
 					write(sccfd,tmp,strlen(tmp));
 				}
 
