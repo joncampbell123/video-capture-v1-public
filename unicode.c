@@ -1,7 +1,6 @@
 /* UTF-8 and UTF-16 Unicode encoder/decoder functions.
- * Impact Studio Pro utilities - Text processors
- * (C) 2008-2011 Impact Studio Pro ALL RIGHTS RESERVED.
- * Written by Jonathan Campbell
+ * (C) 2008-2015 Jonathan Campbell.
+ * Alternate open source copy for video capture project.
  *
  * For each encode/decode function you pass the address
  * of the char pointer itself, not the value of the char
