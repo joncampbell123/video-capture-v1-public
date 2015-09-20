@@ -1,5 +1,5 @@
 
-#include <isp-utils-v4/text/sliding_window.h>
+#include "sliding_window.h"
 
 #ifdef __cplusplus
 extern "C" {
