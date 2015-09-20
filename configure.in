@@ -1,0 +1,68 @@
+#                                               -*- Autoconf -*-
+# Process this file with autoconf to produce a configure script.
+
+AC_PREREQ([2.59]) # Sorry troy
+AC_INIT([video-capture-v1], [1.0], [jonathan@castus.tv])
+AM_INIT_AUTOMAKE([video-capture-v1],[1.0])
+AC_CONFIG_SRCDIR([cleantree])
+AC_CONFIG_HEADER([config.h])
+AC_CONFIG_MACRO_DIR([m4])
+AC_PREFIX_DEFAULT([/usr])
+
+# Checks for programs.
+AC_PROG_CC
+AC_PROG_CXX
+AM_PROG_CC_C_O
+
+# Checks for header files.
+AC_HEADER_STDC
+AC_CHECK_HEADERS([fcntl.h stdint.h stdlib.h string.h sys/socket.h unistd.h])
+
+# we require pkg-config
+PKG_PROG_PKG_CONFIG
+
+# This code uses GTK+
+# But we can maintain max flexibility by using GTK+2 or GTK+3
+AC_ARG_WITH([gtk3], AS_HELP_STRING([--with-gtk3],[Use GTK+3])) # FIXME: not yet tested
+AC_ARG_WITH([gtk2], AS_HELP_STRING([--with-gtk2],[Use GTK+2]))
+AC_ARG_WITH([gtk2104], AS_HELP_STRING([--with-gtk2104],[Use GTK+2.10.4]))
+
+# default: GTK+2
+if test "x$with_gtk3" != xyes && test "x$with_gtk2" != xyes; then
+  with_gtk2=yes
+  with_gtk3=no
+fi
+
+if test "x$with_gtk3" = xyes; then
+  with_gtk2=no
+  PKG_CHECK_MODULES([GTK], [gtk+-3.0])
+fi
+if test "x$with_gtk2" = xyes; then
+  with_gtk3=no
+  PKG_CHECK_MODULES([GTK], [gtk+-2.0])
+fi
+PKG_CHECK_MODULES([ALSA], [alsa])
+
+# which FFMPEG to use
+# TODO: --with-ffmpegext or some way for the builder to say we should use the system-wide FFMPEG instead
+
+# Checks for typedefs, structures, and compiler characteristics.
+AC_TYPE_INT64_T
+AC_TYPE_UINT32_T
+AC_TYPE_UINT8_T
+
+# Checks for library functions.
+AC_FUNC_MALLOC
+AC_FUNC_MEMCMP
+AC_CHECK_FUNCS([memset])
+
+# variables for multi-target
+AM_CONDITIONAL(WIN32,false)
+AM_CONDITIONAL(LINUX,true)
+
+AC_CONFIG_FILES([Makefile])
+AC_OUTPUT
+
+# where are we?
+top="`pwd`"
+

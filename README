@@ -1,0 +1,49 @@
+Video capture and archiving program.
+
+Runtime requirements:
+
+ - Linux kernel 2.6 or higher
+ - Video4linux2 compatible capture devices (the older Linux 2.4-ish video4linux interface is not supported)
+ - 1GHz processor or faster, dual core recommended
+ - 256MB of RAM or higher
+ - X-Windows (XFree86 or X.org) with SHM and Xv extension libraries
+ - GTK+ 2.23 or higher
+ - Glib, pango, freetype
+
+Also recommended:
+
+ - X-Windows installion with stable drivers and YUV overlay support
+ - 800x600 or higher display
+ - Plenty of hard disk space
+
+
+
+As of 2011/11/30 some keyboard shortcuts have been implemented to assist in using the program:
+ 
+   Left/Right Arrow Keys ................. Single-step through the AVI
+   Spacebar .............................. Toggle between Play/Pause or begin playback
+   Escape ................................ Stop playback
+   ',' and '.' keys ...................... Slow down/Speed up and possibly reverse playback.
+                                           These keys also have < and > markings on them.
+   1, 2, 3, and 4 ........................ Switch to input 1, 2, 3, or 4
+   Shift+I ............................... Switch to IP input
+   Shift+F ............................... Switch to File input
+   Ctrl+O ................................ Select capture file for File input
+
+What is currently implemented:
+ - video capture, live feed display, and recording to an AVI file when recording activated
+ - loading/saving configuration (videocap.ini)
+ - IP input configuration dialog
+ - Client-server communication
+ - The use of the X-Windows SHM extension (shared memory segment bitmap transfer)
+ - The use of the X-Windows XVideo extension to enable use of the hardware YUV overlay
+     typically present on modern VGA graphics chipsets.
+ - Scrubbing through the captured file
+
+Yet to do:
+ - IP input decoding and display (MPEG transport stream). TS code is in place, not yet
+   fully functional.
+ - File -> Convert menu command. I understand one of the things to implement was a
+     "convert to other format" option.
+ - IP input metadata reception and decoding (partially written, not yet stable and complete).
+

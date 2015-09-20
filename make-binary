@@ -1,0 +1,19 @@
+#!/bin/bash
+#
+# Take compiled files and data and copy to a bin/<arch> directory.
+# You can then package that binary in a tarball (or whatever you want)
+# and unpack on any compatible Linux system as a complete software package.
+
+rm -Rf bin || exit 1
+mkdir bin || exit 1
+
+arch=x86
+arch_literal=`uname -m` # usually, either "i686" or "x86_64"
+if [[ x"$arch_literal" == x"x86_64" || x"$arch_literal" == x"x86-64" ]]; then arch=x86_64; fi
+
+mkdir bin/$arch || exit 1
+cp -v README ffmpeg ffprobe capture_v4l videocap lib*.so.* *.png bin/$arch/ || exit 1
+
+# remove debug symbols to reduce size
+strip --strip-debug -R .comment bin/$arch/{ffmpeg,ffprobe,capture_v4l,videocap,lib*.so.*}
+

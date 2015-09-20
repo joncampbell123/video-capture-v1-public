@@ -1,0 +1,19 @@
+#!/bin/bash
+make -C $FFMPEG clean >/dev/null 2>&1
+make -C $FFMPEG distclean >/dev/null 2>&1
+
+find -name \*~ -delete
+find -name \*.o -delete
+find -name \*.a -delete
+find -name \*.d -delete
+find -name \*.so -delete
+find -name \*.so.\* -delete
+find -name \*.la -delete
+find -name \*.lo -delete
+find -name \*.pc -delete
+find -name \*.avi -delete
+rm -f valgrind.txt gtk_hello.ini lib*.so.* ffprobe ffmpeg
+rm -Rf autom4te.cache m4 aclocal.m4 autoscan.log configure config.log config.sub gtk_hello capture_v4l videocap Makefile.in stamp-h1 config.h config.status Makefile .deps confdefs.h
+# FFMPEG too
+rm -f $FFMPEG/.config
+

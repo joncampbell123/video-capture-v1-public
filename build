@@ -1,0 +1,10 @@
+#!/bin/bash
+./cleantree
+./autogen.sh
+./configure --prefix=/usr || exit 1
+
+cores=`grep processor /proc/cpuinfo | wc -l`
+JSW="-j$cores"
+
+make $JSW || exit 1
+

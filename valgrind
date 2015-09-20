@@ -1,0 +1,3 @@
+#!/bin/bash
+valgrind --leak-check=full --show-reachable=yes --num-callers=50 $* 2>valgrind.txt
+
