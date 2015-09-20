@@ -1,19 +1,9 @@
-/* TODO:
- *    - Linux 64-bit compile test               [ ] Run
- *    - Windows 32-bit compile test             [ ] Run
- *    - Windows 64-bit compile test             [ ] Run
- *    - Mac OS X 32-bit compile test            [ ] Run
- *    - Mac OS X 64-bit compile test            [ ] Run
- */
-
 /* Sliding window generic buffer management.
  * Useful for stream parsing functions like AC-3 or MPEG audio decoding
  * in an efficient manner.
  *
- * Impact Studio Pro utilities - Text processors
- * (C) 2008-2010 Impact Studio Pro ALL RIGHTS RESERVED.
- * Written by Jonathan Campbell
- *
+ * (C) 2008-2015 Jonathan Campbell
+ * Alternate open source copy for video capture project.
  */
 
 #include <sys/types.h>
