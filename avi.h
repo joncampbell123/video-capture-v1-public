@@ -3,11 +3,11 @@
 
 #include <stdint.h>
 
-#include <isp-utils-v4/misc/informational.h>
-#include <isp-utils-v4/win/wave_mmreg.h>
-#include <isp-utils-v4/win/waveformatex.h>
-#include <isp-utils-v4/win/bitmapinfoheader.h>
-#include <isp-utils-v4/riff/riff.h>
+#include "informational.h"
+#include "wave_mmreg.h"
+#include "waveformatex.h"
+#include "bitmapinfoheader.h"
+#include "riff.h"
 
 #ifdef __cplusplus
 extern "C" {

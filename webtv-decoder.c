@@ -32,7 +32,7 @@
 #include <stdio.h>
 #include <time.h>
 
-#include <isp-utils-v4/eia-608/webtv-decoder.h>
+#include "webtv-decoder.h"
 
 void eia608_webtv_reader_init(eia608_webtv_reader *i) {
 	memset(i,0,sizeof(*i));

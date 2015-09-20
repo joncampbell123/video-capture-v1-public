@@ -2,8 +2,8 @@
  * RIFF library
  * (C) 2012-2015 Jonathan Campbell */
 
-#include <isp-utils-v4/misc/rawint.h>
-#include <isp-utils-v4/riff/riff.h>
+#include "rawint.h"
+#include "riff.h"
 #include <unistd.h>
 #include <stdlib.h>
 #include <string.h>

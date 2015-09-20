@@ -8,8 +8,8 @@
 #include <fcntl.h>
 #include <errno.h>
 
-#include <isp-utils-v4/eia-608/scc-reader.h>
-#include <isp-utils-v4/eia-608/eia608-decoder.h>
+#include "scc-reader.h"
+#include "eia608-decoder.h"
 
 static int no_parity = 0;
 static int dump_to_stdout = 0;

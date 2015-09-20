@@ -7,7 +7,7 @@
 #include <fcntl.h>
 #include <stdio.h>
 
-#include <isp-utils-v4/eia-608/extended-data-service-decoder.h>
+#include "extended-data-service-decoder.h"
 
 xds_data_assembly *xds_data_assembly_create() {
 	xds_data_assembly *x = (xds_data_assembly*)malloc(sizeof(xds_data_assembly));

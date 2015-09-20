@@ -1,5 +1,5 @@
 
-#include <isp-utils-v4/eia-608/eia608-demux.h>
+#include "eia608-demux.h"
 
 void eia608_demux_init(eia608_demux *d,unsigned char want_mode) {
 	d->current_mode = EIA608_DM_NONE;

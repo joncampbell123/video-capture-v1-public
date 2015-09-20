@@ -1,8 +1,8 @@
 
 #include <stdio.h>
 #include <stdint.h>
-#include <isp-utils-v4/misc/smpte_sdi_vanc.h>
-#include <isp-utils-v4/eia-608/smpte_sdi_vanc_eia608_packet.h>
+#include "smpte_sdi_vanc.h"
+#include "smpte_sdi_vanc_eia608_packet.h"
 
 int smpte_sdi_vanc_decode_eia608_packet(struct smpte_sdi_vanc_eia608_packet *pkt,unsigned char *s,unsigned char *f) {
 	if (pkt == NULL || (s+3) > f) return -1;

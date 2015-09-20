@@ -8,9 +8,9 @@
 #include <fcntl.h>
 #include <errno.h>
 
-#include <isp-utils-v4/misc/parity.h>
-#include <isp-utils-v4/eia-608/eia608-decoder.h>
-#include <isp-utils-v4/eia-608/line21-analog-decoder.h>
+#include "parity.h"
+#include "eia608-decoder.h"
+#include "line21-analog-decoder.h"
 
 long eia608_decoder_parse_analog_line21(unsigned char *scanline,size_t in_scan_width,eia608_analog_line21_decoder_state *s) {
 	size_t i,pulsew,pulsewa,minpulse,maxpulse,avgpulse,thr,reading[256],mins=255,maxs=0,skipped;

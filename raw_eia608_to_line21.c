@@ -9,8 +9,8 @@
 #include <fcntl.h>
 #include <errno.h>
 
-#include <isp-utils-v4/misc/parity.h>
-#include <isp-utils-v4/eia-608/line21-analog-encoder.h>
+#include "parity.h"
+#include "line21-analog-encoder.h"
 
 int main(int argc,char **argv) {
 	unsigned long long counter=0;

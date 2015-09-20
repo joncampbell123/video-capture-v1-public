@@ -4,7 +4,7 @@
 
 #include <math.h>
 
-#include <isp-utils-v4/eia-608/line21-analog-encoder.h>
+#include "line21-analog-encoder.h"
 
 #include "config.h"
 

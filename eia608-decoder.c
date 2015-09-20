@@ -23,11 +23,11 @@
 #include <fcntl.h>
 #include <stdio.h>
 
-#include <isp-utils-v4/eia-608/eia608-font-8x14.h>
-#include <isp-utils-v4/eia-608/eia608-decoder.h>
-#include <isp-utils-v4/misc/vgafont_8x14.h>
-#include <isp-utils-v4/misc/vgafont_8x8.h>
-#include <isp-utils-v4/misc/rawint.h>
+#include "eia608-font-8x14.h"
+#include "eia608-decoder.h"
+#include "vgafont_8x14.h"
+#include "vgafont_8x8.h"
+#include "rawint.h"
 
 const uint16_t eia608_row_to_rowcode_val[16] = {
 	0x1060,	/* 0 invalid row */

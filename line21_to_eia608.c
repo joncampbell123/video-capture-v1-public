@@ -8,8 +8,8 @@
 #include <fcntl.h>
 #include <errno.h>
 
-#include <isp-utils-v4/eia-608/eia608-decoder.h>
-#include <isp-utils-v4/eia-608/line21-analog-decoder.h>
+#include "eia608-decoder.h"
+#include "line21-analog-decoder.h"
 
 static int no_parity = 0;
 static int nonstateful = 0;

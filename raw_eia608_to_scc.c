@@ -7,7 +7,7 @@
 #include <fcntl.h>
 #include <errno.h>
 
-#include <isp-utils-v4/misc/parity.h>
+#include "parity.h"
 
 int main(int argc,char **argv) {
 	static const char *header = "Scenarist_SCC V1.0\n\n";

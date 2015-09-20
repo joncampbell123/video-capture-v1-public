@@ -10,7 +10,7 @@
 #include <fcntl.h>
 #include <stdio.h>
 
-#include <isp-utils-v4/eia-608/scc-reader.h>
+#include "scc-reader.h"
 
 void scc_eia608_reader_free(scc_eia608_reader *x) {
 	memset(x,0,sizeof(*x));
