@@ -1,6 +1,6 @@
 /* Windows multimedia (WAVE) format and audio interface structures
  * Common Windows-based structures
- * (C) 2012-2014 Castus Corporation */
+ * (C) 2012-2015 Jonathan Campbell */
 
 #ifndef __ISP_UTILS_V4_WIN_WAVEFORMATEX_H
 #define __ISP_UTILS_V4_WIN_WAVEFORMATEX_H

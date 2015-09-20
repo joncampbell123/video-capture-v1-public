@@ -1,6 +1,6 @@
 /* Windows multimedia (WAVE) format registered wFormatTag identifiers
  * Common Windows-based structures
- * (C) 2012-2014 Castus Corporation */
+ * (C) 2012-2015 Jonathan Campbell */
 
 #ifndef __ISP_UTILS_V4_WAVEMMREG_H
 #define __ISP_UTILS_V4_WAVEMMREG_H
