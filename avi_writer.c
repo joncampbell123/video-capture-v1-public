@@ -47,10 +47,10 @@
  *     application receiving the AVI, it's all the same.
  */
 
-#include <isp-utils-v4/misc/rawint.h>
-#include <isp-utils-v4/avi/avi.h>
-#include <isp-utils-v4/avi/avi_writer.h>
-#include <isp-utils-v4/avi/avi_rw_iobuf.h>
+#include "rawint.h"
+#include "avi.h"
+#include "avi_writer.h"
+#include "avi_rw_iobuf.h"
 #include <unistd.h>
 #include <stdlib.h>
 #include <assert.h>

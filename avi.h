@@ -1,16 +1,29 @@
-/* AVI file structure definitions. Also defines the BITMAPINFOHEADER and WAVE format structures.
- * (C) 2008-2015 Jonathan Campbell.
- * Alternate copy for open source video capture project.
- */
- 
-#ifndef __VIDEOCAP_VIDEOCAP_AVI_H
-#define __VIDEOCAP_VIDEOCAP_AVI_H
+#ifndef __VIDEOMGR_UTIL_AVI_H
+#define __VIDEOMGR_UTIL_AVI_H
 
 #include <stdint.h>
 
+#include <isp-utils-v4/misc/informational.h>
+#include <isp-utils-v4/win/wave_mmreg.h>
+#include <isp-utils-v4/win/waveformatex.h>
+#include <isp-utils-v4/win/bitmapinfoheader.h>
+#include <isp-utils-v4/riff/riff.h>
+
+#ifdef __cplusplus
+extern "C" {
+#endif
+
+#if defined(_MSC_VER)
+# pragma pack(push,1)
+#endif
+
+/* typedef for an AVI FOURCC */
 typedef uint32_t avi_fourcc_t;
+
+/* take chars and form them into an AVI FOURCC (little endian byte order) */
 #define avi_fourcc_const(a,b,c,d)	( (((uint32_t)(a)) << 0U) | (((uint32_t)(b)) << 8U) | (((uint32_t)(c)) << 16U) | (((uint32_t)(d)) << 24U) )
 
+/* common AVI FOURCCs */
 #define avi_riff_AVI			avi_fourcc_const('A','V','I',' ')
 #define avi_riff_movi			avi_fourcc_const('m','o','v','i')
 #define avi_riff_hdrl			avi_fourcc_const('h','d','r','l')
@@ -26,23 +39,37 @@ typedef uint32_t avi_fourcc_t;
 
 #define avi_fccType_audio		avi_fourcc_const('a','u','d','s')
 #define avi_fccType_video		avi_fourcc_const('v','i','d','s')
+#define avi_fccType_iavs		avi_fourcc_const('i','a','v','s')
 
 /* AVI file struct: AVIMAINHEADER */
-typedef struct {
-	/* FOURCC */
-	/* uint32_t cb */
-	uint32_t        dwMicroSecPerFrame;
-	uint32_t        dwMaxBytesPerSec;
-	uint32_t        dwPaddingGranularity;
-	uint32_t        dwFlags;
-	uint32_t        dwTotalFrames;
-	uint32_t        dwInitialFrames;
-	uint32_t        dwStreams;
-	uint32_t        dwSuggestedBufferSize;
-	uint32_t        dwWidth;
-	uint32_t        dwHeight;
-	uint32_t        dwReserved[4];
-} __attribute__((packed)) riff_avih_AVIMAINHEADER;
+/* AVI placement in file:
+ * 
+ * RIFF:AVI
+ *   LIST:hdrl
+ *     avih            <------- *HERE* usually first chunk in hdrl list
+ *   LIST:strl
+ *     strh
+ *     strf
+ * ...
+ */
+typedef struct {						/* (sizeof) (offset hex) (offset dec) */
+	/* NTS: The first two fields defined in Microsoft's SDK headers are not repeated here, because
+	 *      they are effectively the AVI RIFF chunk header, which most of our code does not include
+	 *      as part of the read (why did you do that, Microsoft?) */
+	/* FOURCC	fcc */
+	/* uint32_t	cb */
+	uint32_t _Little_Endian_	dwMicroSecPerFrame;	/* (4)  +0x00 +0 */
+	uint32_t _Little_Endian_	dwMaxBytesPerSec;	/* (4)  +0x04 +4 */
+	uint32_t _Little_Endian_	dwPaddingGranularity;	/* (4)  +0x08 +8 */
+	uint32_t _Little_Endian_	dwFlags;		/* (4)  +0x0C +12 */
+	uint32_t _Little_Endian_	dwTotalFrames;		/* (4)  +0x10 +16 */
+	uint32_t _Little_Endian_	dwInitialFrames;	/* (4)  +0x14 +20 */
+	uint32_t _Little_Endian_	dwStreams;		/* (4)  +0x18 +24 */
+	uint32_t _Little_Endian_	dwSuggestedBufferSize;	/* (4)  +0x1C +28 */
+	uint32_t _Little_Endian_	dwWidth;		/* (4)  +0x20 +32 */
+	uint32_t _Little_Endian_	dwHeight;		/* (4)  +0x24 +36 */
+	uint32_t _Little_Endian_	dwReserved[4];		/* (16) +0x28 +40 */
+} __attribute__((packed)) riff_avih_AVIMAINHEADER;		/* (56) =0x38 =56 */
 
 #define riff_avih_AVIMAINHEADER_flags_HASINDEX				0x00000010UL
 #define riff_avih_AVIMAINHEADER_flags_MUSTUSEINDEX			0x00000020UL
@@ -52,29 +79,59 @@ typedef struct {
 #define riff_avih_AVIMAINHEADER_flags_COPYRIGHTED			0x00020000UL
 
 /* AVI file struct: AVISTREAMHEADER */
-typedef struct {
-	/* FOURCC */
-	/* uint32_t cb */
-	avi_fourcc_t    fccType;
-	avi_fourcc_t    fccHandler;
-	uint32_t        dwFlags;
-	uint16_t        wPriority;
-	uint16_t        wLanguage;
-	uint32_t        dwInitialFrames;
-	uint32_t        dwScale;
-	uint32_t        dwRate;
-	uint32_t        dwStart;
-	uint32_t        dwLength;
-	uint32_t        dwSuggestedBufferSize;
-	uint32_t        dwQuality;
-	uint32_t        dwSampleSize;
+/* AVI placement in file:
+ * 
+ * RIFF:AVI
+ *   LIST:hdrl
+ *     avih
+ *   LIST:strl         <------- one LIST per AVI stream
+ *     strh            <------- *HERE* usually first chunk in strl list
+ *     strf
+ * ...
+ */
+typedef struct {						/* (sizeof) (offset hex) (offset dec) */
+	/* NTS: The first two fields defined in Microsoft's SDK headers are not repeated here, because
+	 *      they are effectively the AVI RIFF chunk header, which most of our code does not include
+	 *      as part of the read (why did you do that, Microsoft?) */
+	/* FOURCC	fcc */
+	/* uint32_t	cb */
+	avi_fourcc_t _Little_Endian_	fccType;		/* (4)  +0x00 +0 */
+	avi_fourcc_t _Little_Endian_	fccHandler;		/* (4)  +0x04 +4 */
+	uint32_t _Little_Endian_	dwFlags;		/* (4)  +0x08 +8 */
+	uint16_t _Little_Endian_	wPriority;		/* (2)  +0x0C +12 */
+	uint16_t _Little_Endian_	wLanguage;		/* (2)  +0x0E +14 */
+	uint32_t _Little_Endian_	dwInitialFrames;	/* (4)  +0x10 +16 */
+	uint32_t _Little_Endian_	dwScale;		/* (4)  +0x14 +20 */
+	uint32_t _Little_Endian_	dwRate;			/* (4)  +0x18 +24 */
+	uint32_t _Little_Endian_	dwStart;		/* (4)  +0x1C +28 */
+	uint32_t _Little_Endian_	dwLength;		/* (4)  +0x20 +32 */
+	uint32_t _Little_Endian_	dwSuggestedBufferSize;	/* (4)  +0x24 +36 */
+	uint32_t _Little_Endian_	dwQuality;		/* (4)  +0x28 +40 */
+	uint32_t _Little_Endian_	dwSampleSize;		/* (4)  +0x2C +44 */
 	struct {
-		int16_t left;
-		int16_t top;
-		int16_t right;
-		int16_t bottom;
+		int16_t _Little_Endian_	left;			/* (2)  +0x30 +48 */
+		int16_t _Little_Endian_	top;			/* (2)  +0x32 +50 */
+		int16_t _Little_Endian_	right;			/* (2)  +0x34 +52 */
+		int16_t _Little_Endian_	bottom;			/* (2)  +0x36 +54 */
 	} __attribute__((packed)) rcFrame;
-} __attribute__((packed)) riff_strh_AVISTREAMHEADER;
+} __attribute__((packed)) riff_strh_AVISTREAMHEADER;		/* (56) +0x38 +56 */
+
+static const riff_strh_AVISTREAMHEADER riff_strh_AVISTREAMHEADER_INIT = {
+	0,
+	0,
+	0,
+	0,
+	0,
+	0,//uint32_t        dwInitialFrames;
+	0,//uint32_t        dwScale;
+	0,//uint32_t        dwRate;
+	0,//uint32_t        dwStart;
+	0,//uint32_t        dwLength;
+	0,//uint32_t        dwSuggestedBufferSize;
+	0,//uint32_t        dwQuality;
+	0,//uint32_t        dwSampleSize;
+	{ 0,0,0,0 }
+};
 
 #define riff_strh_AVISTREAMHEADER_flags_DISABLED			0x00000001UL
 #define riff_strh_AVISTREAMHEADER_flags_VIDEO_PALCHANGES		0x00010000UL
@@ -209,134 +266,34 @@ typedef struct {
 	uint32_t	dwTotalFrames;
 } __attribute__((packed)) riff_odml_dmlh_ODMLExtendedAVIHeader;
 
-/* --------------------------------------- WAVE structures (used in AVI) --------------------------- */
+/* AVI stream format contents if stream type is 'iavs' (Interleaved audio/video stream) */
+typedef struct windows_DVINFO {
+	uint32_t	dwDVAAuxSrc;
+	uint32_t	dwDVAAuxCtl;
+	uint32_t	dwDVAAuxSrc1;
+	uint32_t	dwDVAAuxCtl1;
+	uint32_t	dwDVVAuxSrc;
+	uint32_t	dwDVVAuxCtl;
+	uint32_t	dwDVReserved[2];
+} __attribute__((packed)) windows_DVINFO; /* =32 bytes */
 
-typedef struct {
-	uint16_t  wFormatTag;
-	uint16_t  nChannels;
-	uint32_t  nSamplesPerSec;
-	uint32_t  nAvgBytesPerSec;
-	uint16_t  nBlockAlign;
-	uint16_t  wBitsPerSample;
-} __attribute__((packed)) windows_WAVEFORMAT;
+static const windows_DVINFO WINDOWS_DVINFO_INIT = {
+	0,
+	0,
+	0,
+	0,
+	0,
+	0,
+	{0,0}
+};
 
-typedef struct {
-	uint16_t  wFormatTag;
-	uint16_t  nChannels;
-	uint32_t  nSamplesPerSec;
-	uint32_t  nAvgBytesPerSec;
-	uint16_t  nBlockAlign;
-	uint16_t  wBitsPerSample;
-	uint16_t  cbSize;
-} __attribute__((packed)) windows_WAVEFORMATEX;
+#if defined(_MSC_VER)
+# pragma pack(pop)
+#endif
 
-typedef struct {
-	windows_WAVEFORMATEX	wfx;
-	uint16_t		wSamplesPerBlock;
-	uint16_t		wNumCoef;
-	uint16_t		aCoef[7*2];	/* NTS: This array is wNumCoef*2 large, for MS-ADPCM wNumCoef == 7 */
-} __attribute__((packed)) windows_ADPCMWAVEFORMAT; /* sizeof() == 32 bytes */
-
-typedef struct {
-	uint32_t  a;
-	uint16_t  b,c;
-	uint8_t   d[2];
-	uint8_t   e[6];
-} __attribute__((packed)) windows_GUID;
-
-typedef struct {
-	windows_WAVEFORMATEX     Format;
-	union { /* Ooookay Microsoft how do I derive meaning from THIS now? */
-		uint16_t         wValidBitsPerSample;
-		uint16_t         wSamplesPerBlock;
-		uint16_t         wReserved;
-	} Samples;
-	uint32_t                 dwChannelMask;
-	windows_GUID             SubFormat;
-} __attribute__((packed)) windows_WAVEFORMATEXTENSIBLE;
-
-#define windows_WAVE_FORMAT_PCM		0x0001
-#define windows_WAVE_FORMAT_MS_ADPCM	0x0002
-#define windows_WAVE_FORMAT_IEEE_FLOAT	0x0003
-
-#define windows_WAVE_FORMAT_ALAW	0x0006
-#define windows_WAVE_FORMAT_MULAW	0x0007
-
-#define windows_WAVE_FORMAT_IMA_ADPCM	0x0011
-
-#define windows_WAVE_FORMAT_EXTENSIBLE	0xFFFE
-
-/* ---------------------------------- BITMAPINFOHEADER (used in AVI and core to the Windows GDI) ---------------- */
-
-typedef struct {
-	uint32_t        biSize; 
-	int32_t         biWidth; 
-	int32_t         biHeight; 
-	uint16_t        biPlanes; 
-	uint16_t        biBitCount; 
-	uint32_t        biCompression; 
-	uint32_t        biSizeImage; 
-	int32_t         biXPelsPerMeter; 
-	int32_t         biYPelsPerMeter; 
-	uint32_t        biClrUsed; 
-	uint32_t        biClrImportant; 
-} __attribute__((packed)) windows_BITMAPINFOHEADER;
-
-typedef struct {
-	uint32_t	ciexyzRed;
-	uint32_t	ciexyzGreen;
-	uint32_t	ciexyzBlue;
-} __attribute__((packed)) windows_CIEXYZTRIPLE;
-
-typedef struct {
-	uint32_t        bV4Size;
-	int32_t         bV4Width;
-	int32_t         bV4Height;
-	uint16_t        bV4Planes;
-	uint16_t        bV4BitCount;
-	uint32_t        bV4V4Compression;
-	uint32_t        bV4SizeImage;
-	int32_t         bV4XPelsPerMeter;
-	int32_t         bV4YPelsPerMeter;
-	uint32_t        bV4ClrUsed;
-	uint32_t        bV4ClrImportant;
-	uint32_t        bV4RedMask;
-	uint32_t        bV4GreenMask;
-	uint32_t        bV4BlueMask;
-	uint32_t        bV4AlphaMask;
-	uint32_t        bV4CSType;
-	windows_CIEXYZTRIPLE bV4Endpoints;
-	uint32_t        bV4GammaRed;
-	uint32_t        bV4GammaGreen;
-	uint32_t        bV4GammaBlue;
-} __attribute__((packed)) windows_BITMAPV4HEADER;
-
-typedef struct {
-	uint32_t        bV5Size;
-	int32_t         bV5Width;
-	int32_t         bV5Height;
-	uint16_t        bV5Planes;
-	uint16_t        bV5BitCount;
-	uint32_t        bV5Compression;
-	uint32_t        bV5SizeImage;
-	int32_t         bV5XPelsPerMeter;
-	int32_t         bV5YPelsPerMeter;
-	uint32_t        bV5ClrUsed;
-	uint32_t        bV5ClrImportant;
-	uint32_t        bV5RedMask;
-	uint32_t        bV5GreenMask;
-	uint32_t        bV5BlueMask;
-	uint32_t        bV5AlphaMask;
-	uint32_t        bV5CSType;
-	windows_CIEXYZTRIPLE bV5Endpoints;
-	uint32_t        bV5GammaRed;
-	uint32_t        bV5GammaGreen;
-	uint32_t        bV5GammaBlue;
-	uint32_t        bV5Intent;
-	uint32_t        bV5ProfileData;
-	uint32_t        bV5ProfileSize;
-	uint32_t        bV5Reserved;
-} __attribute__((packed)) windows_BITMAPV5HEADER;
+#ifdef __cplusplus
+}
+#endif
 
 #endif
 

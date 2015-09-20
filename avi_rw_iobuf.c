@@ -7,9 +7,9 @@
  * closure or AVI loading quite a lot since lseek+read/write calls in Linux
  * are a performance killer compared to using read/write without lseek. */
 
-#include <isp-utils-v4/misc/rawint.h>
-#include <isp-utils-v4/avi/avi_reader.h>
-#include <isp-utils-v4/avi/avi_rw_iobuf.h>
+#include "rawint.h"
+#include "avi_reader.h"
+#include "avi_rw_iobuf.h"
 #include <assert.h>
 #include <stdlib.h>
 #include <unistd.h>

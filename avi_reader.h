@@ -1,7 +1,6 @@
 #ifndef ___AVIREADER_H
 #define ___AVIREADER_H
 
-#include "riff.h"
 #include "avi.h"
 
 #ifdef __cplusplus
