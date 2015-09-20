@@ -1,6 +1,6 @@
 #!/usr/bin/perl
 
-$project = 'video-capture-v1';
+$project = 'video-capture-v1-public';
 
 $branch = `git branch | grep '^\*' | sed -e 's/^\* //'`; chomp $branch;
 $branchfname = "-branch-$branch" if $branch ne "";
