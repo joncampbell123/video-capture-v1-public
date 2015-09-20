@@ -82,7 +82,7 @@ static unsigned char				emitted_rawtext=0;
 static unsigned int				cc_counter=0,cc_space=0;
 
 static void help() {
-	fprintf(stderr,"castus_demo_eia608 [options] <pes file>\n");
+	fprintf(stderr,"eia608_decoder_test [options] <pes file>\n");
 	fprintf(stderr,"    -h --help                 This help\n");
 	fprintf(stderr,"    -v                        Verbose\n");
 	fprintf(stderr,"    -text                     Text display mode\n");
@@ -1027,7 +1027,7 @@ int main(int argc,char **argv) {
 		return -1;
 	}
 
-	SDL_WM_SetCaption("Castus EIA-608 Closed Caption decoder emulation",NULL);
+	SDL_WM_SetCaption("Video capture project EIA-608 Closed Caption decoder emulation",NULL);
 
 	/* dammit SDL */
 	signal(SIGINT,sigma);

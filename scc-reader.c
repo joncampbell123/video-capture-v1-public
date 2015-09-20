@@ -1,6 +1,5 @@
 /* Scenarist Closed Caption *.scc file reader library
- * (C) 2013 Castus Corporation ALL RIGHTS Reserved.
- * Written by Jonathan Campbell */
+ * (C) 2013-2015 Jonathan Campbell */
 
 #include <assert.h>
 #include <unistd.h>
