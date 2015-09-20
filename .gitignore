@@ -1,0 +1,6 @@
+bin
+bin/i686
+bin/x86_64
+bin/*
+bin/*/*
+
