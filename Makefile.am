@@ -2,7 +2,7 @@ SUBDIRS =
 ACLOCAL_AMFLAGS = -I m4
 top = $(shell pwd)
 
-noinst_PROGRAMS = videocap capture_v4l line21_to_eia608 raw_eia608_to_line21 raw_eia608_to_scc
+noinst_PROGRAMS = videocap capture_v4l line21_to_eia608 raw_eia608_to_line21 raw_eia608_to_scc scc_eia608_to_raw
 
 # enable a "make binary-pkg" command, which creates a "bin/<arch>" subdirectory suitable for binary distribution
 binary-pkg:
@@ -20,6 +20,10 @@ raw_eia608_to_line21_LDFLAGS = -lm
 # test util
 raw_eia608_to_scc_SOURCES = raw_eia608_to_scc.c
 raw_eia608_to_scc_CFLAGS = -D_FILE_OFFSET_BITS=64
+
+# test util
+scc_eia608_to_raw_SOURCES = scc_eia608_to_raw.c sliding_window.c scc-reader.c
+scc_eia608_to_raw_CFLAGS = -D_FILE_OFFSET_BITS=64
 
 # capture sub-process
 capture_v4l_SOURCES = capture_v4l.cpp now.c avi_writer.c avi_reader.c avi_rw_iobuf.c riff.c
