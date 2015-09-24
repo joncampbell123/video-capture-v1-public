@@ -3849,10 +3849,17 @@ static gint v4l_capres_dropdown_populate_and_select(GtkWidget *listbox,GtkListSt
 		"352x288",
 		"352x480",
 		"480x480",
+		"480x576",
 		"576x480",
+		"576x576",
 		"640x480",
+		"640x576",
 		"720x480",
 		"720x576",
+		"800x600",
+		"1024x768",
+		"1280x720",
+		"1920x1080",
 		NULL
 	};
 	void **hints,**n;
