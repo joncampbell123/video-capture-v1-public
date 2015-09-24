@@ -602,7 +602,7 @@ bool InputManager::load_external_avi_for_play(const char *path) {
 
 				fprintf(stderr,"Trying %u\n",i);
 				if (s->strh.fccType == avi_fccType_video && s->strf_chunk.data_length < 6000 && s->strf_chunk.absolute_data_offset != 0ULL &&
-					s->strh.dwRate != 0 && s->strh.dwScale != 0) {
+					s->strh.dwRate != 0 && s->strh.dwScale != 0 && video_stream < 0) {
 					/* is this a video stream that I know how to handle? */
 					/* determine this by reading the 'strf' chunk for this stream */
 					/* TODO: Support for codecs other than DIVX/MPEG-4 */
@@ -637,7 +637,6 @@ bool InputManager::load_external_avi_for_play(const char *path) {
 								i,bmp->biWidth,bmp->biHeight);
 							video_stream = i;
 						}
-
 					}
 				}
 			}
