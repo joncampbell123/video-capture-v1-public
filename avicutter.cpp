@@ -275,6 +275,7 @@ public:
 				return false;
 			}
 
+//			fprintf(stderr,"Stream #%zu: fmtlen=%zu loaded\n",stream,fi->datalen);
 			stream_format_data[stream] = fi;
 		}
 
