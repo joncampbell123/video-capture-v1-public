@@ -11,6 +11,7 @@
 #include <ctype.h>
 #include <math.h>
 
+#include <vector>
 #include <string>
 
 using namespace std;
@@ -123,6 +124,36 @@ public:
 	~AVISource() {
 		close();
 	}
+public:
+	class fmtinfo {
+public:
+		fmtinfo() : data(NULL), datalen(0) {
+		}
+		~fmtinfo() {
+			free_data();
+		}
+		bool alloc_data(const size_t len/*length of strf*/) {
+			free_data();
+			if (len == 0) return false;
+			if (len > 65536) return false;
+
+			data = new (std::nothrow) unsigned char[len];
+			if (data == NULL) return false;
+			datalen = len;
+			return true;
+		}
+		void free_data() {
+			if (data) {
+				delete[] data;
+				data = NULL;
+			}
+			datalen = 0;
+		}
+public:
+		unsigned char*		data;
+		size_t			datalen;
+	};
+public:
 	bool open(const char *path) {
 		close();
 
@@ -156,6 +187,7 @@ public:
 		return true;
 	}
 	void close() {
+		free_all_format_data();
 		savi = avi_reader_destroy(savi);
 		if (savi_fd >= 0) {
 			::close(savi_fd);
@@ -170,18 +202,90 @@ public:
 		if (savi == NULL) return size_t(0);
 		return (size_t)(savi->avi_streams);
 	}
-	avi_reader_stream *get_stream(size_t c) {
+	avi_reader_stream *get_stream(const size_t c) {
 		if (savi == NULL) return NULL;
 		if (savi->avi_stream == NULL) return NULL;
 		if (c >= (size_t)(savi->avi_streams)) return NULL;
 		return savi->avi_stream + c;
 	}
-	riff_strh_AVISTREAMHEADER *get_stream_header(size_t c) {
+	riff_strh_AVISTREAMHEADER *get_stream_header(const size_t c) {
 		avi_reader_stream *s = get_stream(c);
 		if (s == NULL) return NULL;
 		return &(s->strh);
 	}
+	unsigned char *get_format_data(const size_t stream) {
+		if (!load_format_data(stream)) return NULL;
+		if (stream >= stream_format_data.size()) return NULL;
+		fmtinfo *fi = stream_format_data[stream];
+		if (fi == NULL) return NULL;
+		return fi->data;
+	}
+	size_t get_format_data_size(const size_t stream) {
+		if (!load_format_data(stream)) return 0;
+		if (stream >= stream_format_data.size()) return 0;
+		fmtinfo *fi = stream_format_data[stream];
+		if (fi == NULL) return 0;
+		return fi->datalen;
+	}
+	void free_format_data(const size_t stream) {
+		if (stream >= stream_format_data.size()) return;
+
+		if (stream_format_data[stream] != NULL) {
+			delete stream_format_data[stream];
+			stream_format_data[stream] = NULL;
+		}
+	}
+	void free_all_format_data() {
+		if (savi == NULL) return;
+
+		for (size_t i=0;i < (size_t)(savi->avi_streams);i++)
+			free_format_data(i);
+
+		stream_format_data.clear();
+	}
+	bool load_format_data(const size_t stream) {
+		int i;
+
+		avi_reader_stream *s = get_stream(stream);
+		if (s == NULL) return false;
+
+		if (s->strf_chunk.absolute_data_offset == 0 || s->strf_chunk.data_length == 0 || s->strf_chunk.data_length > 65536)
+			return false;
+
+		while (stream_format_data.size() <= stream)
+			stream_format_data.push_back((fmtinfo*)NULL);
+
+		if (stream_format_data[stream] == NULL) {
+			fmtinfo *fi = new (std::nothrow) fmtinfo();
+			if (fi == NULL) return false;
+
+			if (!fi->alloc_data((size_t)(s->strf_chunk.data_length))) {
+				delete fi;
+				return false;
+			}
+			assert(fi->data != NULL);
+			assert(fi->datalen >= (size_t)(s->strf_chunk.data_length));
+
+			riff_stack_push(savi->stack,&(s->strf_chunk));
+			i = riff_stack_read(savi->stack,riff_stack_top(savi->stack),fi->data,fi->datalen);
+			riff_stack_pop(savi->stack);
+
+			if (i != (int)fi->datalen) {
+				delete fi;
+				return false;
+			}
+
+			stream_format_data[stream] = fi;
+		}
+
+		return true;
+	}
+	void load_all_format_data() {
+		for (size_t i=0;i < (size_t)(savi->avi_streams);i++)
+			load_format_data(i);
+	}
 public:
+	std::vector<fmtinfo*>	stream_format_data;
 	avi_reader*		savi;
 	int			savi_fd;
 };
@@ -199,6 +303,7 @@ int main(int argc,char **argv) {
 		fprintf(stderr,"Failed to open source avi '%s'\n",in_avi.c_str());
 		return 1;
 	}
+	savi.load_all_format_data();
 
 	savi.close();
 	return 0;
