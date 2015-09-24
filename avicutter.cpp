@@ -117,6 +117,62 @@ static bool parse(int argc,char **argv) {
 	return true;
 }
 
+class AVIDestination {
+public:
+	AVIDestination() : davi(NULL) {
+	}
+	~AVIDestination() {
+		close();
+	}
+public:
+	bool begin_header() {
+		if (davi != NULL)
+			return (avi_writer_begin_header(davi) != 0)?true:false;
+
+		return false;
+	}
+	bool begin_data() {
+		if (davi != NULL)
+			return (avi_writer_begin_data(davi) != 0)?true:false;
+
+		return false;
+	}
+	bool end_data() {
+		if (davi != NULL) 
+			return (avi_writer_end_data(davi) != 0)?true:false;
+
+		return false;
+	}
+	void close() {
+		if (davi != NULL) {
+			avi_writer_end_data(davi);
+			avi_writer_finish(davi);
+			avi_writer_close_file(davi);
+			davi = avi_writer_destroy(davi);
+		}
+	}
+	bool open(const char *path) {
+		close();
+
+		if ((davi=avi_writer_create()) == NULL) {
+			close();
+			return false;
+		}
+		if (!avi_writer_open_file(davi,path)) {
+			close();
+			return false;
+		}
+
+		return true;
+	}
+	riff_avih_AVIMAINHEADER *mainheader() {
+		if (davi == NULL) return NULL;
+		return avi_writer_main_header(davi);
+	}
+public:
+	avi_writer*		davi;
+};
+
 class AVISource {
 public:
 	AVISource() : savi(NULL), savi_fd(-1) {
@@ -293,6 +349,7 @@ public:
 
 int main(int argc,char **argv) {
 	AVISource savi;
+	AVIDestination davi;
 
 	if (!parse(argc,argv)) {
 		help();
@@ -306,6 +363,40 @@ int main(int argc,char **argv) {
 	}
 	savi.load_all_format_data();
 
+	/* dest AVI? */
+	if (!davi.open(out_avi.c_str())) {
+		fprintf(stderr,"Failed to open dest avi '%s'\n",out_avi.c_str());
+		return 1;
+	}
+
+	/* whatever AVI header is in the source, copy to the test */
+	{
+		riff_avih_AVIMAINHEADER *sh,*dh;
+
+		sh = savi.mainheader();
+		dh = davi.mainheader();
+		if (sh == NULL || dh == NULL) {
+			fprintf(stderr,"Failed to access AVI main header, sh=%p dh=%p\n",
+				(void*)sh,(void*)dh);
+			return 1;
+		}
+
+		/* copy */
+		*dh = *sh;
+	}
+
+	/* begin dest AVI */
+	if (!davi.begin_header()) {
+		fprintf(stderr,"dest avi failed to begin header\n");
+		return 1;
+	}
+	if (!davi.begin_data()) {
+		fprintf(stderr,"dest avi failed to begin data\n");
+		return 1;
+	}
+
+	davi.end_data();
+	davi.close();
 	savi.close();
 	return 0;
 }
