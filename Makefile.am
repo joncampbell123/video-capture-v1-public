@@ -2,7 +2,7 @@ SUBDIRS =
 ACLOCAL_AMFLAGS = -I m4
 top = $(shell pwd)
 
-noinst_PROGRAMS = videocap capture_v4l line21_to_eia608 raw_eia608_to_line21 raw_eia608_to_scc scc_eia608_to_raw eia608_decoder_test c4_riff_datamosh_assist c4_riff_datamosh_assist2
+noinst_PROGRAMS = videocap capture_v4l line21_to_eia608 raw_eia608_to_line21 raw_eia608_to_scc scc_eia608_to_raw eia608_decoder_test c4_riff_datamosh_assist c4_riff_datamosh_assist2 avicutter
 
 # enable a "make binary-pkg" command, which creates a "bin/<arch>" subdirectory suitable for binary distribution
 binary-pkg:
@@ -37,6 +37,11 @@ c4_riff_datamosh_assist_CFLAGS = -std=gnu99 -D_FILE_OFFSET_BITS=64
 # fun util
 c4_riff_datamosh_assist2_SOURCES = c4_riff_datamosh_assist2.c now.c avi_writer.c avi_reader.c avi_rw_iobuf.c riff.c
 c4_riff_datamosh_assist2_CFLAGS = -std=gnu99 -D_FILE_OFFSET_BITS=64
+
+# fun util
+avicutter_SOURCES = avicutter.cpp now.c avi_writer.c avi_reader.c avi_rw_iobuf.c riff.c
+avicutter_CXXFLAGS = -std=gnu++0x -D_FILE_OFFSET_BITS=64
+avicutter_LDFLAGS = -lm
 
 # capture sub-process
 capture_v4l_SOURCES = capture_v4l.cpp now.c avi_writer.c avi_reader.c avi_rw_iobuf.c riff.c
