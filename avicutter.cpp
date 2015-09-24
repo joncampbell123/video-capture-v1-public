@@ -116,15 +116,91 @@ static bool parse(int argc,char **argv) {
 	return true;
 }
 
+class AVISource {
+public:
+	AVISource() : savi(NULL), savi_fd(-1) {
+	}
+	~AVISource() {
+		close();
+	}
+	bool open(const char *path) {
+		close();
+
+		savi_fd = ::open(path,O_RDONLY);
+		if (savi_fd < 0) {
+			close();
+			return false;
+		}
+
+		savi = avi_reader_create();
+		if (savi == NULL) {
+			close();
+			return false;
+		}
+
+		avi_reader_fd(savi,savi_fd);
+		riff_stack_assign_fd_ownership(savi->stack);
+		savi_fd = -1;
+
+		if (!avi_reader_scan(savi)) {
+			close();
+			return false;
+		}
+		avi_reader_scan_odml_index(savi);
+		avi_reader_scan_index1(savi);
+		if (savi->avi_streams == 0) {
+			close();
+			return false;
+		}
+
+		return true;
+	}
+	void close() {
+		savi = avi_reader_destroy(savi);
+		if (savi_fd >= 0) {
+			::close(savi_fd);
+			savi_fd = -1;
+		}
+	}
+	riff_avih_AVIMAINHEADER *mainheader() {
+		if (savi == NULL) return NULL;
+		return &(savi->avi_main_header);
+	}
+	size_t stream_count() {
+		if (savi == NULL) return size_t(0);
+		return (size_t)(savi->avi_streams);
+	}
+	avi_reader_stream *get_stream(size_t c) {
+		if (savi == NULL) return NULL;
+		if (savi->avi_stream == NULL) return NULL;
+		if (c >= (size_t)(savi->avi_streams)) return NULL;
+		return savi->avi_stream + c;
+	}
+	riff_strh_AVISTREAMHEADER *get_stream_header(size_t c) {
+		avi_reader_stream *s = get_stream(c);
+		if (s == NULL) return NULL;
+		return &(s->strh);
+	}
+public:
+	avi_reader*		savi;
+	int			savi_fd;
+};
+
 int main(int argc,char **argv) {
-	avi_reader *savi;
-	avi_writer *davi;
+	AVISource savi;
 
 	if (!parse(argc,argv)) {
 		help();
 		return 1;
 	}
 
+	/* source AVI? */
+	if (!savi.open(in_avi.c_str())) {
+		fprintf(stderr,"Failed to open source avi '%s'\n",in_avi.c_str());
+		return 1;
+	}
+
+	savi.close();
 	return 0;
 }
 
