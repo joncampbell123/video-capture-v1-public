@@ -501,13 +501,14 @@ int main(int argc,char **argv) {
 
 	struct audio_scan {
 public:
-		audio_scan() : avi_index(0), avi_index_offset(0), avi_index_max(0), byte_offset(0) {
+		audio_scan() : avi_index(0), avi_index_offset(0), avi_index_max(0), byte_offset(0), avi_index_fileoffset(0) {
 		}
 public:
 		size_t		avi_index;
 		size_t		avi_index_offset;
 		size_t		avi_index_max;
 		uint64_t	byte_offset;
+		off_t		avi_index_fileoffset;
 	};
 	std::vector<audio_scan> audio_stream_scan;
 
@@ -660,6 +661,7 @@ public:
 					ascan.avi_index++;
 					ascan.avi_index_max = 0;
 					ascan.avi_index_offset = 0;
+					ascan.avi_index_fileoffset = 0;
 					ascan.byte_offset += (uint64_t)size;
 					continue;
 				}
@@ -667,6 +669,7 @@ public:
 				ascan.avi_index_max = (size_t)size;
 				ascan.avi_index_offset = (size_t)howmuch;
 				ascan.byte_offset += (uint64_t)howmuch;
+				ascan.avi_index_fileoffset = file_offset;
 				break;
 			}
 
@@ -744,12 +747,10 @@ public:
 				if (strh->fccType == avi_fccType_audio) {
 					if (audio_crop[stream].first < audio_crop[stream].second) {
 						tt = (double)audio_crop[stream].first / audio_sample_rate[stream];
-						if (false) {
-							if (least_t < 0 || least_t > tt) {
-								least_t = tt;
-								do_stream = (int)stream;
-								keep_going = true;
-							}
+						if (least_t < 0 || least_t > tt) {
+							least_t = tt;
+							do_stream = (int)stream;
+							keep_going = true;
 						}
 					}
 				}
@@ -775,7 +776,64 @@ public:
 				if (strh->fccType == avi_fccType_audio) {
 					assert(audio_crop[do_stream].first < audio_crop[do_stream].second);
 					audio_scan &ascan = audio_stream_scan[do_stream];
+					size_t max_blocks = audio_sample_rate[do_stream] / 5;
+					assert(max_blocks != 0);
+					size_t do_blocks = max_blocks;
 
+					uint64_t boff = (uint64_t)audio_crop[do_stream].first * audio_bytes_per_block[do_stream];
+					if (boff != ascan.byte_offset) fprintf(stderr,"Audio byte offset mismatch\n");
+
+					if ((audio_crop[do_stream].first + do_blocks) > audio_crop[do_stream].second)
+						do_blocks = audio_crop[do_stream].second - audio_crop[do_stream].first;
+
+					size_t do_bytes = do_blocks * audio_bytes_per_block[do_stream];
+					int rd,do_rd;
+
+					audio_crop[do_stream].first += do_blocks;
+					while (do_bytes > 0) {
+						off_t file_offset;
+						uint32_t size,dwFlags;
+						size_t bsz = do_bytes;
+
+						while (ascan.avi_index_offset >= ascan.avi_index_max) {
+							if (ascan.avi_index >= savi.read_stream_max_index((size_t)do_stream)) break;
+
+							ascan.avi_index++;
+							ascan.avi_index_max = 0;
+							ascan.avi_index_offset = 0;
+							if (!savi.read_stream_index((size_t)do_stream,ascan.avi_index,/*&*/file_offset,/*&*/size,/*&*/dwFlags)) continue;
+							ascan.avi_index_fileoffset = file_offset;
+							ascan.avi_index_max = (size_t)size;
+						}
+
+						if (ascan.avi_index_offset < ascan.avi_index_max) {
+							if (bsz > (ascan.avi_index_max-ascan.avi_index_offset))
+								bsz = (ascan.avi_index_max-ascan.avi_index_offset);
+
+							if (riff_stack_seek(savi.savi->stack,NULL,ascan.avi_index_fileoffset+ascan.avi_index_offset) == (ascan.avi_index_fileoffset+ascan.avi_index_offset)) {
+								if (riff_stack_read(savi.savi->stack,NULL,framedata,bsz) == bsz) {
+									if (!avi_writer_stream_write(davi.davi,davi.get_stream(do_stream),framedata,bsz,dwFlags))
+										fprintf(stderr,"AVI audio failed to write\n");
+								}
+								else {
+									fprintf(stderr,"AVI frame cannot read\n");
+								}
+							}
+							else {
+								fprintf(stderr,"AVI frame cannot seek\n");
+							}
+
+							assert(do_bytes >= bsz);
+							do_bytes -= bsz;
+
+							ascan.byte_offset += bsz;
+							ascan.avi_index_offset += bsz;
+							assert(ascan.avi_index_offset <= ascan.avi_index_max);
+						}
+						else {
+							break;
+						}
+					}
 				}
 				else if (strh->fccType == avi_fccType_video) {
 					assert(video_crop[do_stream].first < video_crop[do_stream].second);
