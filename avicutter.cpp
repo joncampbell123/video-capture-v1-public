@@ -389,7 +389,7 @@ public:
 	avi_reader_stream_odml_index *get_odml_index(const size_t stream) {
 		if (savi == NULL) return NULL;
 		if (savi->avi_streams == 0) return NULL;
-		if (savi->avi_stream_index1 == NULL) return NULL;
+		if (savi->avi_stream_odml_index == NULL) return NULL;
 		
 		avi_reader_stream_odml_index *r = savi->avi_stream_odml_index + stream;
 		if (r->count == 0 || r->map == NULL) return NULL;
