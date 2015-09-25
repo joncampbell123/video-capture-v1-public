@@ -141,6 +141,12 @@ public:
 
 		return false;
 	}
+	bool end_header() {
+		if (davi != NULL)
+			return (avi_writer_end_header(davi) != 0)?true:false;
+
+		return false;
+	}
 	bool begin_data() {
 		if (davi != NULL)
 			return (avi_writer_begin_data(davi) != 0)?true:false;
@@ -290,6 +296,31 @@ public:
 			return false;
 		}
 
+		/* locate the info chunk.
+		 * look first in the standard AVI location LIST:INFO within the main RIFF:AVI chunk.
+		 * because of capture I've done with an older AVI writer library with a bug, we must also check the end of the AVI for a LIST:INFO at the top level. */
+		{
+			riff_chunk chunk;
+
+			riff_stack_empty(savi->stack);
+			riff_stack_push(savi->stack,&savi->riff_avi_chunk);
+			riff_stack_seek(savi->stack,riff_stack_top(savi->stack),0);
+
+			while (riff_stack_readchunk(savi->stack,riff_stack_top(savi->stack),&chunk)) {
+				if (riff_stack_chunk_contains_subchunks(&chunk) != 0) {
+					if (chunk.fourcc == avi_fourcc_const('I','N','F','O')) {
+						fprintf(stderr,"Found LIST:INFO chunk at %llu size=%lu\n",
+							(unsigned long long)chunk.absolute_data_offset,
+							(unsigned long)chunk.data_length);
+						info_chunk = chunk;
+						break;
+					}
+				}
+			}
+
+			riff_stack_empty(savi->stack);
+		}
+
 		return true;
 	}
 	void close() {
@@ -299,6 +330,7 @@ public:
 			::close(savi_fd);
 			savi_fd = -1;
 		}
+		memset(&info_chunk,0,sizeof(info_chunk));
 	}
 	riff_avih_AVIMAINHEADER *mainheader() {
 		if (savi == NULL) return NULL;
@@ -484,6 +516,7 @@ public:
 		return 0;
 	}
 public:
+	riff_chunk		info_chunk;			/* LIST:INFO chunk */
 	std::vector<fmtinfo*>	stream_format_data;
 	avi_reader*		savi;
 	int			savi_fd;
@@ -699,6 +732,10 @@ public:
 	/* begin dest AVI */
 	if (!davi.begin_header()) {
 		fprintf(stderr,"dest avi failed to begin header\n");
+		return 1;
+	}
+	if (!davi.end_header()) {
+		fprintf(stderr,"dest avi failed to end header\n");
 		return 1;
 	}
 	if (!davi.begin_data()) {
