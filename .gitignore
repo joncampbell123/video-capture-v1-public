@@ -5,4 +5,5 @@ bin/*
 bin/*/*
 videocap.ini
 input*.log
+input*.avi
 
