@@ -252,6 +252,23 @@ int avi_writer_begin_data(avi_writer *w) {
 	return 1;
 }
 
+int avi_writer_end_header(avi_writer *w) {
+	if (w == NULL) return 0;
+	if (w->state != AVI_WRITER_STATE_HEADER) return 0;
+
+	/* make sure we're down into the 'AVI ' chunk */
+	while (w->riff->current > 0)
+		riff_stack_pop(w->riff);
+
+	/* make sure this is the movi chunk */
+	if (w->riff->current != 0)
+		return 0;
+	if (w->riff->top->fourcc != riff_fourcc_const('A','V','I',' '))
+		return 0;
+
+	return 1;
+}
+
 int avi_writer_begin_header(avi_writer *w) {
 	riff_chunk chunk;
 	int stream;

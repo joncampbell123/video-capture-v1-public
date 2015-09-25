@@ -68,6 +68,7 @@ int avi_writer_open_file(avi_writer *w,const char *path);
 avi_writer *avi_writer_destroy(avi_writer *w);
 int avi_writer_begin_data(avi_writer *w);
 int avi_writer_begin_header(avi_writer *w);
+int avi_writer_end_header(avi_writer *w);
 int avi_writer_stream_write(avi_writer *w,avi_writer_stream *s,void *data,size_t len,uint32_t flags);
 int avi_writer_stream_repeat_last_chunk(avi_writer *w,avi_writer_stream *s);
 int avi_writer_set_stream_writing(avi_writer *w);
