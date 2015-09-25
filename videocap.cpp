@@ -2175,6 +2175,8 @@ bool put_live_frame_on_screen(InputManager *input,bool force_redraw/*TODO*/) {
 		}
 	}
 
+	std::string status;
+
 	if (!input->Playing && input->vt_rec.video_rate_n > 0UL && input->vt_rec.video_rate_d > 0UL) {
 		char tmp[256];
 		const char *name;
@@ -2203,9 +2205,10 @@ bool put_live_frame_on_screen(InputManager *input,bool force_redraw/*TODO*/) {
 		tH = (unsigned int)(tm / 1000LL / 3600LL);
 
 		snprintf(tmp,sizeof(tmp),"Recorded %u:%02u:%02u.%03u (playback at %u:%02u:%02u.%03u) %s",tH,tM,tS,tmS,H,M,S,mS,name);
-		gui_status(tmp);
+		status = tmp;
 	}
-	else {
+
+	if (!input->Playing) {
 		char tmp[256];
 		char *w = tmp;
 
@@ -2219,9 +2222,10 @@ bool put_live_frame_on_screen(InputManager *input,bool force_redraw/*TODO*/) {
 				(xx->map[input->shmem_out].audio_avg_level[ch]*100)/32767);
 		}
 
-		gui_status(tmp);
+		status += tmp;
 	}
 
+	gui_status(status.c_str());
 	return ret;
 }
 
