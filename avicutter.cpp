@@ -459,7 +459,7 @@ public:
 		uint64_t tmp = (uint64_t)floor(t * strh->dwRate);
 		return (size_t)(tmp / strh->dwScale);
 	}
-	uint64_t seconds2blocks(const size_t stream,const double t,size_t &samples_per_block,size_t &bytes_per_block,size_t &block_sample_offset) {
+	uint64_t seconds2blocks(const size_t stream,const double t,size_t &samples_per_block,size_t &bytes_per_block,size_t &block_sample_offset,size_t &sample_rate) {
 		avi_reader_stream *strm = get_stream(stream);
 		if (strm == NULL) return 0;
 
@@ -476,6 +476,7 @@ public:
 			uint64_t samp = (uint64_t)floor(t * wfx->nSamplesPerSec);
 			samples_per_block = 1;
 			bytes_per_block = wfx->nBlockAlign;
+			sample_rate = wfx->nSamplesPerSec;
 			block_sample_offset = 0;
 			return samp;
 		}
@@ -495,6 +496,8 @@ int main(int argc,char **argv) {
 	std::vector<std::pair<uint64_t,uint64_t> > audio_crop; /* in audio blocks */
 	std::vector<size_t> audio_samples_per_block;
 	std::vector<size_t> audio_bytes_per_block;
+	std::vector<size_t> audio_sample_rate;
+	std::vector<size_t> video_start;
 
 	struct audio_scan {
 public:
@@ -606,6 +609,8 @@ public:
 		video_crop.push_back(std::pair<size_t,size_t>(0,0));
 		audio_samples_per_block.push_back(0);
 		audio_bytes_per_block.push_back(0);
+		audio_sample_rate.push_back(0);
+		video_start.push_back(0);
 	}
 	audio_stream_scan.resize(savi.stream_count());
 	video_stream_scan.resize(savi.stream_count());
@@ -618,15 +623,16 @@ public:
 		if (strh == NULL) continue;
 
 		if (strh->fccType == avi_fccType_audio) {
-			size_t samples_per_block=0,bytes_per_block=0,block_sample_offset=0;
+			size_t samples_per_block=0,bytes_per_block=0,block_sample_offset=0,sample_rate=0;
 			uint64_t start,end;
 
-			start = savi.seconds2blocks(stream,start_time,/*&*/samples_per_block,/*&*/bytes_per_block,/*&*/block_sample_offset);
+			start = savi.seconds2blocks(stream,start_time,/*&*/samples_per_block,/*&*/bytes_per_block,/*&*/block_sample_offset,/*&*/sample_rate);
 			audio_samples_per_block[stream] = samples_per_block;
 			audio_bytes_per_block[stream] = bytes_per_block;
+			audio_sample_rate[stream] = sample_rate;
 			audio_crop[stream].first = start;
 
-			end = savi.seconds2blocks(stream,end_time,/*&*/samples_per_block,/*&*/bytes_per_block,/*&*/block_sample_offset);
+			end = savi.seconds2blocks(stream,end_time,/*&*/samples_per_block,/*&*/bytes_per_block,/*&*/block_sample_offset,/*&*/sample_rate);
 			if (block_sample_offset != 0) end++;
 			audio_crop[stream].second = end;
 
@@ -665,11 +671,14 @@ public:
 			fprintf(stderr,"AVI index #%zu scan: index=%zu offset=%zu/%zu byteoffset=%llu\n",
 				stream,ascan.avi_index,ascan.avi_index_offset,ascan.avi_index_max,(unsigned long long)ascan.byte_offset);
 		}
-		else if (strh->fccType = avi_fccType_video) {
+		else if (strh->fccType == avi_fccType_video) {
 			size_t start,end;
 
 			start = savi.seconds2frames(stream,start_time);
 			end = savi.seconds2frames(stream,end_time);
+			video_crop[stream].first = start;
+			video_crop[stream].second = end;
+			video_start[stream] = start;
 
 			fprintf(stderr,"Video stream #%zu: frames=%zu-%zu\n",
 				stream,start,end);
@@ -711,6 +720,118 @@ public:
 		return 1;
 	}
 
+	/* DO IT */
+	{
+		bool keep_going;
+		double least_t = -1,tt;
+		int do_stream = -1;
+
+		keep_going = true;
+		do {
+			keep_going = false;
+			do_stream = -1;
+			least_t = -1;
+
+			for (size_t stream=0;stream < savi.stream_count();stream++) {
+				avi_reader_stream *strm = savi.get_stream(stream);
+				if (strm == NULL) continue;
+
+				riff_strh_AVISTREAMHEADER *strh = savi.get_stream_header(stream);
+				if (strh == NULL) continue;
+
+				if (strh->fccType == avi_fccType_audio) {
+					if (audio_crop[stream].first < audio_crop[stream].second) {
+						tt = (double)audio_crop[stream].first / audio_sample_rate[stream];
+						if (false) {
+							if (least_t < 0 || least_t > tt) {
+								least_t = tt;
+								do_stream = (int)stream;
+								keep_going = true;
+							}
+						}
+					}
+				}
+				else if (strh->fccType == avi_fccType_video) {
+					if (video_crop[stream].first < video_crop[stream].second) {
+						uint64_t tmp = video_crop[stream].first * strh->dwRate;
+						tt = (double)tmp / strh->dwScale;
+						if (least_t < 0 || least_t > tt) {
+							least_t = tt;
+							do_stream = (int)stream;
+							keep_going = true;
+						}
+					}
+				}
+			}
+
+			if (do_stream >= 0) {
+				assert(do_stream < savi.stream_count());
+
+				riff_strh_AVISTREAMHEADER *strh = savi.get_stream_header((size_t)do_stream);
+				if (strh == NULL) continue;
+
+				if (strh->fccType == avi_fccType_audio) {
+					assert(audio_crop[do_stream].first < audio_crop[do_stream].second);
+					audio_scan &ascan = audio_stream_scan[do_stream];
+
+				}
+				else if (strh->fccType == avi_fccType_video) {
+					assert(video_crop[do_stream].first < video_crop[do_stream].second);
+					video_scan &vscan = video_stream_scan[do_stream];
+					bool do_copy = false;
+
+					if (vscan.wait_for_keyframe) { /* AVI scan above left avi_index at keyframe. copy keyframe NOW to start stream properly */
+						vscan.wait_for_keyframe = false;
+						do_copy = true;
+					}
+					else if (video_crop[do_stream].first >= vscan.avi_index) {
+						do_copy = true;
+					}
+
+					if (do_copy) {
+						off_t file_offset;
+						uint32_t size,dwFlags;
+
+						if (savi.read_stream_index((size_t)do_stream,vscan.avi_index,/*&*/file_offset,/*&*/size,/*&*/dwFlags)) {
+							{
+								int patience = 1000;
+								assert(davi.get_stream(do_stream) != NULL);
+								while (davi.get_stream(do_stream)->sample_write_chunk < (video_crop[do_stream].first - video_start[do_stream]) && patience-- > 0)
+									avi_writer_stream_write(davi.davi,davi.get_stream(do_stream),NULL,0,0);
+							}
+
+							if (size == 0) {
+								/* do nothing */
+							}
+							else if (size <= sizeof(framedata)) {
+								if (riff_stack_seek(savi.savi->stack,NULL,file_offset) == file_offset) {
+									if (riff_stack_read(savi.savi->stack,NULL,framedata,size) == size) {
+										if (!avi_writer_stream_write(davi.davi,davi.get_stream(do_stream),framedata,size,dwFlags))
+											fprintf(stderr,"AVI frame failed to write\n");
+									}
+									else {
+										fprintf(stderr,"AVI frame cannot read\n");
+									}
+								}
+								else {
+									fprintf(stderr,"AVI frame cannot seek\n");
+								}
+							}
+							else {
+								fprintf(stderr,"AVI frame too large!\n");
+							}
+						}
+
+						vscan.avi_index++;
+					}
+
+					video_crop[do_stream].first++;
+				}
+			}
+		} while (keep_going);
+	}
+
+	/* done */
 	davi.end_data();
 	davi.close();
 	savi.close();
