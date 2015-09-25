@@ -91,7 +91,7 @@ signed long scc_eia608_reader_get_word(scc_eia608_reader *x,sliding_window_v4 *w
 
 		/* second field */
 		if (!sliding_window_v4_safe_strtoui(w,&S,10)) goto abrupt_ending;
-		if (*(w->data) != ':') goto invalid_line_data;
+		if (*(w->data) != ':' && *(w->data) != ';') goto invalid_line_data;
 		(w->data)++;
 
 		/* frame field */
