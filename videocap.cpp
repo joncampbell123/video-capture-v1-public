@@ -681,8 +681,8 @@ bool InputManager::load_external_avi_for_play(const char *path) {
 					/* NTS: Some codecs (like Microsoft MPEG-4) need the width & height from the stream format */
 					video_avcodec_ctx->width = vt_play.video_width;
 					video_avcodec_ctx->height = vt_play.video_height;
-					video_avcodec_ctx->thread_count = how_many_cpus();
-					video_avcodec_ctx->thread_type = FF_THREAD_SLICE;
+					video_avcodec_ctx->thread_count = 1;//how_many_cpus();
+					video_avcodec_ctx->thread_type = 0;//FF_THREAD_SLICE;
 					/* NTS: do NOT set FF_THREAD_FRAME because this code cannot handle it,
 					 *      it causes FFMPEG to buffer frames according to the number of threads,
 					 *      and delay them that much, when this code assumes that there is

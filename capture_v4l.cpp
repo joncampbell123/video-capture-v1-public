@@ -320,7 +320,7 @@ static void open_avi_file() {
 	fmp4_context->sample_aspect_ratio.num = 1;
 	fmp4_context->sample_aspect_ratio.den = 1;
 	fmp4_context->thread_count = how_many_cpus();
-	fmp4_context->thread_type = FF_THREAD_SLICE;
+	fmp4_context->thread_type = 0;//FF_THREAD_SLICE;
 	fmp4_context->thread_type |= FF_THREAD_FRAME;
 //	fmp4_context->flags2 |= CODEC_FLAG2_FAST;
 //	fmp4_context->flags |= CODEC_FLAG_LOW_DELAY;
