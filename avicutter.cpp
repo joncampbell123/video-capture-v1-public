@@ -520,7 +520,7 @@ int main(int argc,char **argv) {
 		}
 	}
 
-	/*DEBUG*/
+#if 0 /*DEBUG*/
 	for (size_t stream=0;stream < savi.stream_count();stream++) {
 		fprintf(stderr,"savi index=%zu max=%zu\n",stream,savi.read_stream_max_index(stream));
 		for (size_t i=0;i < savi.read_stream_max_index(stream);i++) {
@@ -537,6 +537,7 @@ int main(int argc,char **argv) {
 			}
 		}
 	}
+#endif
 
 	/* begin dest AVI */
 	if (!davi.begin_header()) {
