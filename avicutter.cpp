@@ -437,6 +437,13 @@ int main(int argc,char **argv) {
 
 			/* copy stream header */
 			*os = *is;
+
+			/* copy format data */
+			unsigned char *fmtdata = savi.get_format_data(stream);
+			size_t fmtlen = savi.get_format_data_size(stream);
+
+			if (fmtdata != NULL && fmtlen != 0)
+				davi.set_format_data(stream,fmtdata,fmtlen);
 		}
 	}
 
