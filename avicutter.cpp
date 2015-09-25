@@ -23,6 +23,8 @@ static string		in_avi;
 static string		out_avi;
 static double		start_time = -1;
 static double		end_time = -1;
+static bool		opt_no_avioldindex = false;
+static bool		opt_no_aviodmlindex = false;
 
 /* DIE flag and signal handler */
 static volatile int DIE = 0;
@@ -31,7 +33,9 @@ static void sigma(int __attribute__((unused)) x) {
 }
 
 static void help() {
-	fprintf(stderr,"avicutter -i <source AVI> --start <time> --end <time> -o <dest AVI>\n");
+	fprintf(stderr,"avicutter [options] -i <source AVI> --start <time> --end <time> -o <dest AVI>\n");
+	fprintf(stderr,"  --ignore-oldindex                Ignore AVIOLDINDEX\n");
+	fprintf(stderr,"  --ignore-odmlindex               Ignore AVISUPERINDEX\n");
 }
 
 /* s => seconds
@@ -99,6 +103,12 @@ static bool parse(int argc,char **argv) {
 			}
 			else if (!strcmp(a,"end")) {
 				end_time = parse_time(argv[i++]);
+			}
+			else if (!strcmp(a,"ignore-oldindex")) {
+				opt_no_avioldindex = true;
+			}
+			else if (!strcmp(a,"ignore-odmlindex")) {
+				opt_no_aviodmlindex = true;
 			}
 			else {
 				fprintf(stderr,"Unknown switch '%s'\n",a);
@@ -268,8 +278,13 @@ public:
 			close();
 			return false;
 		}
-		avi_reader_scan_odml_index(savi);
-		avi_reader_scan_index1(savi);
+
+		if (!opt_no_aviodmlindex)
+			avi_reader_scan_odml_index(savi);
+
+		if (!opt_no_avioldindex)
+			avi_reader_scan_index1(savi);
+
 		if (savi->avi_streams == 0) {
 			close();
 			return false;
