@@ -388,12 +388,15 @@ int avi_writer_stream_repeat_last_chunk(avi_writer *w,avi_writer_stream *s) {
 		/* if we're writing an OpenDML 2.0 compliant file, and we're approaching a movi size of 1GB,
 		 * then split the movi chunk and start another RIFF:AVIX */
 		if ((unsigned long long)(w->riff->top->write_offset + 8) >= 0x3FF00000ULL) { /* 1GB - 16MB */
-			riff_stack_writing_sync(w->riff); /* sync all headers and pop all chunks */
-			assert(w->riff->current == -1); /* should be at top level */
+			if (w->enable_stream_writing) riff_stack_header_sync(w->riff,riff_stack_top(w->riff));
+			riff_stack_pop(w->riff); // exit 'movi'
 
 			/* at the first 1GB boundary emit AVIOLDINDEX for older AVI applications */
 			if (w->group == 0 && w->enable_avioldindex)
 				avi_writer_emit_avioldindex(w);
+
+			riff_stack_writing_sync(w->riff); /* sync all headers and pop all chunks */
+			assert(w->riff->current == -1); /* should be at top level */
 
 			/* [1] RIFF:AVIX */
 			assert(riff_stack_begin_new_chunk_here(w->riff,&chunk));
@@ -488,12 +491,15 @@ int avi_writer_stream_write(avi_writer *w,avi_writer_stream *s,void *data,size_t
 		/* if we're writing an OpenDML 2.0 compliant file, and we're approaching a movi size of 1GB,
 		 * then split the movi chunk and start another RIFF:AVIX */
 		if ((unsigned long long)(w->riff->top->write_offset + len) >= 0x3FF00000ULL) { /* 1GB - 16MB */
-			riff_stack_writing_sync(w->riff); /* sync all headers and pop all chunks */
-			assert(w->riff->current == -1); /* should be at top level */
+			if (w->enable_stream_writing) riff_stack_header_sync(w->riff,riff_stack_top(w->riff));
+			riff_stack_pop(w->riff); // exit 'movi'
 
 			/* at the first 1GB boundary emit AVIOLDINDEX for older AVI applications */
 			if (w->group == 0 && w->enable_avioldindex)
 				avi_writer_emit_avioldindex(w);
+
+			riff_stack_writing_sync(w->riff); /* sync all headers and pop all chunks */
+			assert(w->riff->current == -1); /* should be at top level */
 
 			/* [1] RIFF:AVIX */
 			assert(riff_stack_begin_new_chunk_here(w->riff,&chunk));
