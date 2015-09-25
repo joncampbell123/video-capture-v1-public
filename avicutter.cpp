@@ -796,8 +796,8 @@ public:
 				}
 				else if (strh->fccType == avi_fccType_video) {
 					if (video_crop[stream].first < video_crop[stream].second) {
-						uint64_t tmp = video_crop[stream].first * strh->dwRate;
-						tt = (double)tmp / strh->dwScale;
+						uint64_t tmp = video_crop[stream].first * strh->dwScale;
+						tt = (double)tmp / strh->dwRate;
 						if (least_t < 0 || least_t > tt) {
 							least_t = tt;
 							do_stream = (int)stream;
