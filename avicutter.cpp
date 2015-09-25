@@ -169,6 +169,41 @@ public:
 		if (davi == NULL) return NULL;
 		return avi_writer_main_header(davi);
 	}
+	size_t stream_count() {
+		if (davi == NULL) return size_t(0);
+		return (size_t)(davi->avi_stream_max);
+	}
+	avi_writer_stream *get_stream(const size_t c) {
+		if (davi == NULL) return NULL;
+		if (davi->avi_stream == NULL) return NULL;
+		if (c >= (size_t)(davi->avi_stream_max)) return NULL;
+		return davi->avi_stream + c;
+	}
+	riff_strh_AVISTREAMHEADER *get_stream_header(const size_t c) {
+		avi_writer_stream *s = get_stream(c);
+		if (s == NULL) return NULL;
+		return avi_writer_stream_header(s);
+	}
+	unsigned char *get_format_data(const size_t stream) {
+		avi_writer_stream *s = get_stream(stream);
+		if (s == NULL) return NULL;
+		return (unsigned char*)(s->format);
+	}
+	size_t get_format_data_size(const size_t stream) {
+		avi_writer_stream *s = get_stream(stream);
+		if (s == NULL) return 0;
+		return s->format_len;
+	}
+	bool set_format_data(const size_t stream,unsigned char *data,const size_t len) {
+		avi_writer_stream *s = get_stream(stream);
+		if (s == NULL) return false;
+		if (!avi_writer_stream_set_format(s,(void*)data,len)) return false;
+		return true;
+	}
+	avi_writer_stream *new_stream() {
+		if (davi == NULL) return NULL;
+		return avi_writer_new_stream(davi);
+	}
 public:
 	avi_writer*		davi;
 };
@@ -383,6 +418,26 @@ int main(int argc,char **argv) {
 
 		/* copy */
 		*dh = *sh;
+	}
+
+	/* copy streams as well */
+	{
+		size_t stream;
+
+		for (stream=0;stream < savi.stream_count();stream++) {
+			riff_strh_AVISTREAMHEADER *is,*os;
+			avi_writer_stream *ow;
+
+			is = savi.get_stream_header(stream);
+			if (is == NULL) continue;
+			ow = davi.new_stream();
+			if (ow == NULL) continue;
+			os = davi.get_stream_header(ow->index);
+			if (os == NULL) continue;
+
+			/* copy stream header */
+			*os = *is;
+		}
 	}
 
 	/* begin dest AVI */
