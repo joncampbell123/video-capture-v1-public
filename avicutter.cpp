@@ -496,6 +496,28 @@ int main(int argc,char **argv) {
 	std::vector<size_t> audio_samples_per_block;
 	std::vector<size_t> audio_bytes_per_block;
 
+	struct audio_scan {
+public:
+		audio_scan() : avi_index(0), avi_index_offset(0), avi_index_max(0), byte_offset(0) {
+		}
+public:
+		size_t		avi_index;
+		size_t		avi_index_offset;
+		size_t		avi_index_max;
+		uint64_t	byte_offset;
+	};
+	std::vector<audio_scan> audio_stream_scan;
+
+	struct video_scan {
+public:
+		video_scan() : avi_index(0), wait_for_keyframe(true) {
+		}
+public:
+		size_t		avi_index;
+		bool		wait_for_keyframe;
+	};
+	std::vector<video_scan> video_stream_scan;
+
 	if (!parse(argc,argv)) {
 		help();
 		return 1;
@@ -585,6 +607,8 @@ int main(int argc,char **argv) {
 		audio_samples_per_block.push_back(0);
 		audio_bytes_per_block.push_back(0);
 	}
+	audio_stream_scan.resize(savi.stream_count());
+	video_stream_scan.resize(savi.stream_count());
 
 	for (size_t stream=0;stream < savi.stream_count();stream++) {
 		avi_reader_stream *strm = savi.get_stream(stream);
@@ -608,6 +632,38 @@ int main(int argc,char **argv) {
 
 			fprintf(stderr,"Audio stream #%zu: blocks=%llu-%llu (samp/block=%zu byte/block=%zu)\n",
 				stream,start,end,samples_per_block,bytes_per_block);
+
+			/* and then prepare AVI scan */
+			assert(stream < audio_stream_scan.size());
+			audio_scan &ascan = audio_stream_scan[stream];
+
+			uint64_t startb = start * (uint64_t)bytes_per_block;
+			uint32_t dwFlags,size;
+			off_t file_offset;
+
+			while (ascan.byte_offset < startb) {
+				if (ascan.avi_index >= savi.read_stream_max_index(stream))
+					break;
+				if (!savi.read_stream_index(stream,ascan.avi_index,/*&*/file_offset,/*&*/size,/*&*/dwFlags))
+					break;
+
+				uint64_t howmuch = startb - ascan.byte_offset;
+				if (howmuch >= (uint64_t)size) {
+					ascan.avi_index++;
+					ascan.avi_index_max = 0;
+					ascan.avi_index_offset = 0;
+					ascan.byte_offset += (uint64_t)size;
+					continue;
+				}
+
+				ascan.avi_index_max = (size_t)size;
+				ascan.avi_index_offset = (size_t)howmuch;
+				ascan.byte_offset += (uint64_t)howmuch;
+				break;
+			}
+
+			fprintf(stderr,"AVI index #%zu scan: index=%zu offset=%zu/%zu byteoffset=%llu\n",
+				stream,ascan.avi_index,ascan.avi_index_offset,ascan.avi_index_max,(unsigned long long)ascan.byte_offset);
 		}
 		else if (strh->fccType = avi_fccType_video) {
 			size_t start,end;
@@ -617,6 +673,31 @@ int main(int argc,char **argv) {
 
 			fprintf(stderr,"Video stream #%zu: frames=%zu-%zu\n",
 				stream,start,end);
+
+			/* and then prepare AVI scan */
+			assert(stream < video_stream_scan.size());
+			video_scan &vscan = video_stream_scan[stream];
+
+			uint32_t dwFlags,size;
+			off_t file_offset;
+
+			vscan.avi_index = (size_t)start;
+
+			/* we need to scan until keyframe */
+			while (1) {
+				if (vscan.avi_index >= savi.read_stream_max_index(stream))
+					break;
+				if (!savi.read_stream_index(stream,vscan.avi_index,/*&*/file_offset,/*&*/size,/*&*/dwFlags))
+					break;
+				if (dwFlags & riff_idx1_AVIOLDINDEX_flags_KEYFRAME)
+					break;
+
+				vscan.avi_index++;
+			}
+
+			fprintf(stderr,"AVI index #%zu scan: index=%zu starting_from=%zu\n",
+				stream,vscan.avi_index,start);
+
 		}
 	}
 
