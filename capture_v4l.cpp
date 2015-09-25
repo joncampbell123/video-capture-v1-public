@@ -180,41 +180,8 @@ static int sched_self_realtime() {
 static const char *auth_sw = "Jonathan's videocap-v1";
 
 static void close_avi_file_doit(avi_writer *avi) {
-	struct v4l2_format vbifmt = v4l_vbi_capfmt;
-	bool write_vbi = capture_vbi && vbi_fd >= 0;
-	riff_chunk chunk;
-
 	avi_writer_end_data(avi);
 	avi_writer_finish(avi);
-
-	riff_stack_begin_new_chunk_here(avi->riff,&chunk);
-	riff_stack_set_chunk_list_type(&chunk,riff_LIST,avi_fourcc_const('I','N','F','O'));
-	riff_stack_push(avi->riff,&chunk);
-
-	riff_stack_begin_new_chunk_here(avi->riff,&chunk);
-	riff_stack_set_chunk_data_type(&chunk,avi_fourcc_const('C','P','S','W'));
-	riff_stack_push(avi->riff,&chunk);
-	riff_stack_write(avi->riff,riff_stack_top(avi->riff),auth_sw,strlen(auth_sw));
-	riff_stack_pop(avi->riff);
-
-	if (write_vbi) {
-		char tmp[1024];
-
-		sprintf(tmp,"VBI %u+%u %u+%u",
-			vbifmt.fmt.vbi.start[0],
-			vbifmt.fmt.vbi.count[0],
-			vbifmt.fmt.vbi.start[1],
-			vbifmt.fmt.vbi.count[1]);
-
-		riff_stack_begin_new_chunk_here(avi->riff,&chunk);
-		riff_stack_set_chunk_data_type(&chunk,avi_fourcc_const('V','B','I',' '));
-		riff_stack_push(avi->riff,&chunk);
-		riff_stack_write(avi->riff,riff_stack_top(avi->riff),tmp,strlen(tmp));
-		riff_stack_pop(avi->riff);
-	}
-
-	riff_stack_pop(avi->riff);
-
 	avi_writer_close_file(avi);
 	avi_writer_destroy(avi);
 	fprintf(stderr,"AVI file closed\n");
@@ -618,6 +585,45 @@ static void open_avi_file() {
 		close_avi_file();
 		return;
 	}
+	if (!avi_writer_end_header(AVI)) {
+		fprintf(stderr,"Cannot end AVI header\n");
+		close_avi_file();
+		return;
+	}
+	{
+		struct v4l2_format vbifmt = v4l_vbi_capfmt;
+		bool write_vbi = capture_vbi && vbi_fd >= 0;
+		riff_chunk chunk;
+
+		riff_stack_begin_new_chunk_here(AVI->riff,&chunk);
+		riff_stack_set_chunk_list_type(&chunk,riff_LIST,avi_fourcc_const('I','N','F','O'));
+		riff_stack_push(AVI->riff,&chunk);
+
+		riff_stack_begin_new_chunk_here(AVI->riff,&chunk);
+		riff_stack_set_chunk_data_type(&chunk,avi_fourcc_const('C','P','S','W'));
+		riff_stack_push(AVI->riff,&chunk);
+		riff_stack_write(AVI->riff,riff_stack_top(AVI->riff),auth_sw,strlen(auth_sw));
+		riff_stack_pop(AVI->riff);
+
+		if (write_vbi) {
+			char tmp[1024];
+
+			sprintf(tmp,"VBI %u+%u %u+%u",
+					vbifmt.fmt.vbi.start[0],
+					vbifmt.fmt.vbi.count[0],
+					vbifmt.fmt.vbi.start[1],
+					vbifmt.fmt.vbi.count[1]);
+
+			riff_stack_begin_new_chunk_here(AVI->riff,&chunk);
+			riff_stack_set_chunk_data_type(&chunk,avi_fourcc_const('V','B','I',' '));
+			riff_stack_push(AVI->riff,&chunk);
+			riff_stack_write(AVI->riff,riff_stack_top(AVI->riff),tmp,strlen(tmp));
+			riff_stack_pop(AVI->riff);
+		}
+
+		riff_stack_pop(AVI->riff);
+	}
+
 	if (!avi_writer_begin_data(AVI)) {
 		fprintf(stderr,"Cannot begin AVI data\n");
 		close_avi_file();
