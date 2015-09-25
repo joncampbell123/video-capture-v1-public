@@ -819,6 +819,7 @@ public:
 					size_t max_blocks = audio_sample_rate[do_stream] / 5;
 					assert(max_blocks != 0);
 					size_t do_blocks = max_blocks;
+					size_t out_data = 0;
 
 					uint64_t boff = (uint64_t)audio_crop[do_stream].first * audio_bytes_per_block[do_stream];
 					if (boff != ascan.byte_offset) fprintf(stderr,"Audio byte offset mismatch\n");
@@ -828,6 +829,11 @@ public:
 
 					size_t do_bytes = do_blocks * audio_bytes_per_block[do_stream];
 					int rd,do_rd;
+
+					if (do_bytes >= sizeof(framedata)) {
+						do_blocks = sizeof(framedata) / audio_bytes_per_block[do_stream];
+						do_bytes = do_blocks * audio_bytes_per_block[do_stream];
+					}
 
 					audio_crop[do_stream].first += do_blocks;
 					while (do_bytes > 0) {
@@ -850,14 +856,10 @@ public:
 							if (bsz > (ascan.avi_index_max-ascan.avi_index_offset))
 								bsz = (ascan.avi_index_max-ascan.avi_index_offset);
 
+							assert((out_data+bsz) <= sizeof(framedata));
 							if (riff_stack_seek(savi.savi->stack,NULL,ascan.avi_index_fileoffset+ascan.avi_index_offset) == (ascan.avi_index_fileoffset+ascan.avi_index_offset)) {
-								if (riff_stack_read(savi.savi->stack,NULL,framedata,bsz) == bsz) {
-									if (!avi_writer_stream_write(davi.davi,davi.get_stream(do_stream),framedata,bsz,dwFlags))
-										fprintf(stderr,"AVI audio failed to write\n");
-								}
-								else {
+								if (riff_stack_read(savi.savi->stack,NULL,framedata+out_data,bsz) != bsz)
 									fprintf(stderr,"AVI frame cannot read\n");
-								}
 							}
 							else {
 								fprintf(stderr,"AVI frame cannot seek\n");
@@ -866,6 +868,7 @@ public:
 							assert(do_bytes >= bsz);
 							do_bytes -= bsz;
 
+							out_data += bsz;
 							ascan.byte_offset += bsz;
 							ascan.avi_index_offset += bsz;
 							assert(ascan.avi_index_offset <= ascan.avi_index_max);
@@ -873,6 +876,11 @@ public:
 						else {
 							break;
 						}
+					}
+
+					if (out_data != 0) {
+						if (!avi_writer_stream_write(davi.davi,davi.get_stream(do_stream),framedata,out_data,riff_idx1_AVIOLDINDEX_flags_KEYFRAME))
+							fprintf(stderr,"AVI audio failed to write\n");
 					}
 				}
 				else if (strh->fccType == avi_fccType_video) {
