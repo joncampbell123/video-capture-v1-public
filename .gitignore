@@ -4,4 +4,5 @@ bin/x86_64
 bin/*
 bin/*/*
 videocap.ini
+input*.log
 
