@@ -178,6 +178,7 @@ static int sched_self_realtime() {
 }
 
 static const char *auth_sw = "Jonathan's videocap-v1";
+static const char *auth_sw_isft = "video-capture-v1-public (https://github.com/joncampbell123/video-capture-v1-public)";
 
 static void close_avi_file_doit(avi_writer *avi) {
 	avi_writer_end_data(avi);
@@ -594,6 +595,12 @@ static void open_avi_file() {
 		struct v4l2_format vbifmt = v4l_vbi_capfmt;
 		bool write_vbi = capture_vbi && vbi_fd >= 0;
 		riff_chunk chunk;
+		char tmp[1024];
+		struct tm *tm;
+		time_t now;
+
+		now = time(NULL);
+		tm = localtime(&now);
 
 		riff_stack_begin_new_chunk_here(AVI->riff,&chunk);
 		riff_stack_set_chunk_list_type(&chunk,riff_LIST,avi_fourcc_const('I','N','F','O'));
@@ -605,9 +612,22 @@ static void open_avi_file() {
 		riff_stack_write(AVI->riff,riff_stack_top(AVI->riff),auth_sw,strlen(auth_sw));
 		riff_stack_pop(AVI->riff);
 
-		if (write_vbi) {
-			char tmp[1024];
+		riff_stack_begin_new_chunk_here(AVI->riff,&chunk);
+		riff_stack_set_chunk_data_type(&chunk,avi_fourcc_const('I','S','F','T')); /* ISFT standard RIFF info chunk */
+		riff_stack_push(AVI->riff,&chunk);
+		riff_stack_write(AVI->riff,riff_stack_top(AVI->riff),auth_sw_isft,strlen(auth_sw_isft));
+		riff_stack_pop(AVI->riff);
 
+		if (tm != NULL) {
+			sprintf(tmp,"%04u-%02u-%02u",tm->tm_year+1900,tm->tm_mon+1,tm->tm_mday);
+			riff_stack_begin_new_chunk_here(AVI->riff,&chunk);
+			riff_stack_set_chunk_data_type(&chunk,avi_fourcc_const('I','C','R','D')); /* ISFT standard RIFF info chunk */
+			riff_stack_push(AVI->riff,&chunk);
+			riff_stack_write(AVI->riff,riff_stack_top(AVI->riff),tmp,strlen(tmp));
+			riff_stack_pop(AVI->riff);
+		}
+
+		if (write_vbi) {
 			sprintf(tmp,"VBI %u+%u %u+%u",
 					vbifmt.fmt.vbi.start[0],
 					vbifmt.fmt.vbi.count[0],
