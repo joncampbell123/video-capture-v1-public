@@ -738,6 +738,28 @@ public:
 		fprintf(stderr,"dest avi failed to end header\n");
 		return 1;
 	}
+
+	/* copy down the INFO chunk */
+	if (savi.info_chunk.absolute_data_offset != 0 && savi.info_chunk.data_length != 0 &&
+		savi.info_chunk.data_length <= sizeof(framedata)) {
+		riff_stack_empty(savi.savi->stack);
+		riff_stack_push(savi.savi->stack,&savi.info_chunk);
+		riff_stack_seek(savi.savi->stack,riff_stack_top(savi.savi->stack),0);
+
+		int rd = riff_stack_read(savi.savi->stack,riff_stack_top(savi.savi->stack),framedata,sizeof(framedata));
+		if (rd >= savi.info_chunk.data_length) {
+			riff_chunk chunk;
+
+			riff_stack_begin_new_chunk_here(davi.davi->riff,&chunk);
+			riff_stack_set_chunk_list_type(&chunk,riff_LIST,avi_fourcc_const('I','N','F','O'));
+			riff_stack_push(davi.davi->riff,&chunk);
+			riff_stack_write(davi.davi->riff,riff_stack_top(davi.davi->riff),framedata,rd);
+			riff_stack_pop(davi.davi->riff);
+		}
+
+		riff_stack_empty(savi.savi->stack);
+	}
+
 	if (!davi.begin_data()) {
 		fprintf(stderr,"dest avi failed to begin data\n");
 		return 1;
