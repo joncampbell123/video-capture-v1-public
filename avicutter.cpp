@@ -376,6 +376,64 @@ public:
 		for (size_t i=0;i < (size_t)(savi->avi_streams);i++)
 			load_format_data(i);
 	}
+	avi_reader_stream_index1 *get_old_index(const size_t stream) {
+		if (savi == NULL) return NULL;
+		if (savi->avi_streams == 0) return NULL;
+		if (savi->avi_stream_index1 == NULL) return NULL;
+		
+		avi_reader_stream_index1 *r = savi->avi_stream_index1 + stream;
+		if (r->count == 0 || r->map == NULL) return NULL;
+
+		return r;
+	}
+	avi_reader_stream_odml_index *get_odml_index(const size_t stream) {
+		if (savi == NULL) return NULL;
+		if (savi->avi_streams == 0) return NULL;
+		if (savi->avi_stream_index1 == NULL) return NULL;
+		
+		avi_reader_stream_odml_index *r = savi->avi_stream_odml_index + stream;
+		if (r->count == 0 || r->map == NULL) return NULL;
+
+		return r;
+	}
+	size_t read_stream_max_index(const size_t stream) {
+		avi_reader_stream_odml_index *odml = get_odml_index(stream);
+		if (odml != NULL) return odml->count;
+
+		avi_reader_stream_index1 *idx1 = get_old_index(stream);
+		if (idx1 != NULL) return idx1->count;
+
+		return 0;
+	}
+	bool read_stream_index(const size_t stream,const size_t index,off_t &file_offset,uint32_t &size,uint32_t &dwFlags) {
+		avi_reader_stream_odml_index *odml = get_odml_index(stream);
+		if (odml != NULL) {
+			if (index >= odml->count) return false;
+			assert(index < odml->alloc);
+
+			avi_reader_stream_odml_index_entry *entry = odml->map + index;
+
+			file_offset = (off_t)entry->offset;
+			size = (uint32_t)AVI_ODML_INDX_SIZE(entry->size);
+			dwFlags = AVI_ODML_INDX_NONKEY(entry->size) ? 0 : riff_idx1_AVIOLDINDEX_flags_KEYFRAME;
+			return true;
+		}
+
+		avi_reader_stream_index1 *idx1 = get_old_index(stream);
+		if (idx1 != NULL) {
+			if (index >= idx1->count) return false;
+			assert(index < idx1->alloc);
+
+			riff_idx1_AVIOLDINDEX *entry = idx1->map + index;
+
+			file_offset = (off_t)entry->dwOffset;
+			size = (uint32_t)entry->dwSize;
+			dwFlags = (uint32_t)entry->dwFlags;
+			return true;
+		}
+
+		return false;
+	}
 public:
 	std::vector<fmtinfo*>	stream_format_data;
 	avi_reader*		savi;
@@ -444,6 +502,24 @@ int main(int argc,char **argv) {
 
 			if (fmtdata != NULL && fmtlen != 0)
 				davi.set_format_data(stream,fmtdata,fmtlen);
+		}
+	}
+
+	/*DEBUG*/
+	for (size_t stream=0;stream < savi.stream_count();stream++) {
+		fprintf(stderr,"savi index=%zu max=%zu\n",stream,savi.read_stream_max_index(stream));
+		for (size_t i=0;i < savi.read_stream_max_index(stream);i++) {
+			off_t file_offset;
+			uint32_t dwFlags;
+			uint32_t size;
+
+			if (savi.read_stream_index(stream,i,/*&*/file_offset,/*&*/size,/*&*/dwFlags)) {
+				fprintf(stderr,"  [%zu] = offset=%llu size=%lu dwFlags=0x%lx\n",
+					i,(unsigned long long)file_offset,(unsigned long)size,(unsigned long)dwFlags);
+			}
+			else {
+				fprintf(stderr,"  [%zu] = n/a\n",i);
+			}
 		}
 	}
 
