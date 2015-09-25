@@ -296,12 +296,12 @@ static const char *xds_program_type(unsigned char code) {
 	switch (code) {
 		case 0x20:	return "Education";
 		case 0x21:	return "Entertainment";
+		case 0x22:	return "Movie";
+		case 0x23:	return "News";
+		case 0xa4:	return "Religious";
+		case 0x25:	return "Sports";
+		case 0x26:	return "Other";
 #if 0
-0xa2	Movie
-0x23	News
-0xa4	Religious
-0x25	Sports
-0x26	Other
 0xa7	Action
 0xa8	Advertisement
 0x29	Animated
