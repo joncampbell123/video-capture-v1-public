@@ -585,25 +585,6 @@ public:
 		}
 	}
 
-#if 0 /*DEBUG*/
-	for (size_t stream=0;stream < savi.stream_count();stream++) {
-		fprintf(stderr,"savi index=%zu max=%zu\n",stream,savi.read_stream_max_index(stream));
-		for (size_t i=0;i < savi.read_stream_max_index(stream);i++) {
-			off_t file_offset;
-			uint32_t dwFlags;
-			uint32_t size;
-
-			if (savi.read_stream_index(stream,i,/*&*/file_offset,/*&*/size,/*&*/dwFlags)) {
-				fprintf(stderr,"  [%zu] = offset=%llu size=%lu dwFlags=0x%lx\n",
-					i,(unsigned long long)file_offset,(unsigned long)size,(unsigned long)dwFlags);
-			}
-			else {
-				fprintf(stderr,"  [%zu] = n/a\n",i);
-			}
-		}
-	}
-#endif
-
 	/* for each stream, figure out how to crop */
 	audio_crop.clear();
 	video_crop.clear();
