@@ -449,6 +449,39 @@ public:
 
 		return false;
 	}
+	size_t seconds2frames(const size_t stream,const double t) {
+		avi_reader_stream *strm = get_stream(stream);
+		if (strm == NULL) return 0;
+
+		riff_strh_AVISTREAMHEADER *strh = get_stream_header(stream);
+		if (strh == NULL) return 0;
+
+		uint64_t tmp = (uint64_t)floor(t * strh->dwRate);
+		return (size_t)(tmp / strh->dwScale);
+	}
+	uint64_t seconds2blocks(const size_t stream,const double t,size_t &samples_per_block,size_t &bytes_per_block,size_t &block_sample_offset) {
+		avi_reader_stream *strm = get_stream(stream);
+		if (strm == NULL) return 0;
+
+		riff_strh_AVISTREAMHEADER *strh = get_stream_header(stream);
+		if (strh == NULL) return 0;
+
+		unsigned char *fmt = get_format_data(stream);
+		size_t fmtlen = get_format_data_size(stream);
+
+		if (fmtlen < sizeof(windows_WAVEFORMAT)) return 0;
+		windows_WAVEFORMAT *wfx = (windows_WAVEFORMAT*)fmt;
+
+		if (wfx->wFormatTag == windows_WAVE_FORMAT_PCM) {
+			uint64_t samp = (uint64_t)floor(t * wfx->nSamplesPerSec);
+			samples_per_block = 1;
+			bytes_per_block = wfx->nBlockAlign;
+			block_sample_offset = 0;
+			return samp;
+		}
+
+		return 0;
+	}
 public:
 	std::vector<fmtinfo*>	stream_format_data;
 	avi_reader*		savi;
@@ -458,6 +491,10 @@ public:
 int main(int argc,char **argv) {
 	AVISource savi;
 	AVIDestination davi;
+	std::vector<std::pair<size_t,size_t> > video_crop;
+	std::vector<std::pair<uint64_t,uint64_t> > audio_crop; /* in audio blocks */
+	std::vector<size_t> audio_samples_per_block;
+	std::vector<size_t> audio_bytes_per_block;
 
 	if (!parse(argc,argv)) {
 		help();
@@ -538,6 +575,50 @@ int main(int argc,char **argv) {
 		}
 	}
 #endif
+
+	/* for each stream, figure out how to crop */
+	audio_crop.clear();
+	video_crop.clear();
+	for (size_t stream=0;stream < savi.stream_count();stream++) {
+		audio_crop.push_back(std::pair<uint64_t,uint64_t>(0,0));
+		video_crop.push_back(std::pair<size_t,size_t>(0,0));
+		audio_samples_per_block.push_back(0);
+		audio_bytes_per_block.push_back(0);
+	}
+
+	for (size_t stream=0;stream < savi.stream_count();stream++) {
+		avi_reader_stream *strm = savi.get_stream(stream);
+		if (strm == NULL) continue;
+
+		riff_strh_AVISTREAMHEADER *strh = savi.get_stream_header(stream);
+		if (strh == NULL) continue;
+
+		if (strh->fccType == avi_fccType_audio) {
+			size_t samples_per_block=0,bytes_per_block=0,block_sample_offset=0;
+			uint64_t start,end;
+
+			start = savi.seconds2blocks(stream,start_time,/*&*/samples_per_block,/*&*/bytes_per_block,/*&*/block_sample_offset);
+			audio_samples_per_block[stream] = samples_per_block;
+			audio_bytes_per_block[stream] = bytes_per_block;
+			audio_crop[stream].first = start;
+
+			end = savi.seconds2blocks(stream,end_time,/*&*/samples_per_block,/*&*/bytes_per_block,/*&*/block_sample_offset);
+			if (block_sample_offset != 0) end++;
+			audio_crop[stream].second = end;
+
+			fprintf(stderr,"Audio stream #%zu: blocks=%llu-%llu (samp/block=%zu byte/block=%zu)\n",
+				stream,start,end,samples_per_block,bytes_per_block);
+		}
+		else if (strh->fccType = avi_fccType_video) {
+			size_t start,end;
+
+			start = savi.seconds2frames(stream,start_time);
+			end = savi.seconds2frames(stream,end_time);
+
+			fprintf(stderr,"Video stream #%zu: frames=%zu-%zu\n",
+				stream,start,end);
+		}
+	}
 
 	/* begin dest AVI */
 	if (!davi.begin_header()) {
