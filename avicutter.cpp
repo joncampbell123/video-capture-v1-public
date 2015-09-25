@@ -553,6 +553,7 @@ public:
 
 		/* copy */
 		*dh = *sh;
+		dh->dwTotalFrames = 0;
 	}
 
 	/* copy streams as well */
@@ -570,8 +571,9 @@ public:
 			os = davi.get_stream_header(ow->index);
 			if (os == NULL) continue;
 
-			/* copy stream header */
+			/* copy stream header, but zero dwLength so AVI writer can update it */
 			*os = *is;
+			os->dwLength = 0;
 
 			/* copy format data */
 			unsigned char *fmtdata = savi.get_format_data(stream);
