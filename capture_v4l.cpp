@@ -1141,6 +1141,11 @@ int open_v4l() {
 		fprintf(stderr,"buffers=%u\n",reqb.count);
 		v4l_buffers = reqb.count;
 
+		/* assume for now an optimisticly high frame rate.
+		 * we'll let V4L correct us later */
+		v4l_framerate_n = 300000; /* Linux kernel trick: 300Hz common multiple of NTSC and PAL */
+		v4l_framerate_d = 1001;
+
 		{
 			struct v4l2_streamparm prm;
 
@@ -1175,12 +1180,33 @@ int open_v4l() {
 				}
 			}
 
+			memset(&prm,0,sizeof(prm));
+			prm.type = V4L2_BUF_TYPE_VIDEO_CAPTURE;
+			if (ioctl(v4l_fd,VIDIOC_G_PARM,&prm)) {
+				fprintf(stderr,"Unable to get parameters, %s\n",strerror(errno));
+				goto fail;
+			}
+
+			/* if we can, read back what the capture card says is the frame rate */
+			if (prm.parm.capture.timeperframe.numerator != 0 && prm.parm.capture.timeperframe.denominator != 0) {
+				v4l_framerate_d = prm.parm.capture.timeperframe.numerator;
+				v4l_framerate_n = prm.parm.capture.timeperframe.denominator;
+			}
+			else {
+				/* TODO: We need to guess from the TV standard */
+			}
+
 			fprintf(stderr,"----new params----\n");
 			fprintf(stderr,"Capable:  0x%08lX\n",(unsigned long)prm.parm.capture.capability);
 			fprintf(stderr,"Capmode:  0x%08lX\n",(unsigned long)prm.parm.capture.capturemode);
 			fprintf(stderr,"T/p/frame:%u/%u\n",(unsigned)prm.parm.capture.timeperframe.numerator,(unsigned)prm.parm.capture.timeperframe.denominator);
 			fprintf(stderr,"Extmode:  0x%08lX\n",(unsigned long)prm.parm.capture.extendedmode);
 			fprintf(stderr,"Readbufs: %u\n",(unsigned)prm.parm.capture.readbuffers);
+
+			fprintf(stderr,"Final video timeline is %lu/%lu (%.6f)\n",
+				(unsigned long)v4l_framerate_n,
+				(unsigned long)v4l_framerate_d,
+				(double)v4l_framerate_n / v4l_framerate_d);
 		}
 
 		/* set up mapping */
