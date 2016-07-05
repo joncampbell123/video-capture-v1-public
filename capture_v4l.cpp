@@ -268,7 +268,7 @@ static void open_avi_file() {
 
 	avcodec_register_all();
 	if (fmp4_codec == NULL) {
-		if ((fmp4_codec = avcodec_find_encoder(CODEC_ID_H264)) == NULL) {
+		if ((fmp4_codec = avcodec_find_encoder(AV_CODEC_ID_H264)) == NULL) {
 			fprintf(stderr,"FFMPEG error, cannot find H.264 encoder\n");
 			close_avi_file();
 			return;
@@ -297,9 +297,9 @@ static void open_avi_file() {
 	fmp4_context->max_b_frames = 0; /* don't use B-frames */
 
 	if (v4l_codec_yshr == 0)
-		fmp4_context->pix_fmt = PIX_FMT_YUV422P;
+		fmp4_context->pix_fmt = AV_PIX_FMT_YUV422P;
 	else
-		fmp4_context->pix_fmt = PIX_FMT_YUV420P;
+		fmp4_context->pix_fmt = AV_PIX_FMT_YUV420P;
 
 	fmp4_context->bit_rate_tolerance = fmp4_context->bit_rate / 2;
 	fmp4_context->noise_reduction = 0;
@@ -356,7 +356,7 @@ static void open_avi_file() {
 
 	if (capture_vbi && vbi_fd >= 0) {
 		if (fmp4_vbi_codec == NULL) {
-			if ((fmp4_vbi_codec = avcodec_find_encoder(CODEC_ID_H264)) == NULL) {
+			if ((fmp4_vbi_codec = avcodec_find_encoder(AV_CODEC_ID_H264)) == NULL) {
 				fprintf(stderr,"FFMPEG error, cannot find H.264 encoder\n");
 				close_avi_file();
 				return;
@@ -379,7 +379,7 @@ static void open_avi_file() {
 		fmp4_vbi_context->width = vbi_width;
 		fmp4_vbi_context->gop_size = AVI_FRAMES_PER_GROUP;
 		fmp4_vbi_context->max_b_frames = 0; /* don't use B-frames */
-		fmp4_vbi_context->pix_fmt = PIX_FMT_YUV420P;
+		fmp4_vbi_context->pix_fmt = AV_PIX_FMT_YUV420P;
 		fmp4_vbi_context->bit_rate_tolerance = fmp4_vbi_context->bit_rate / 2;
 		fmp4_vbi_context->noise_reduction = 0;
 		fmp4_vbi_context->spatial_cplx_masking = 0.0;

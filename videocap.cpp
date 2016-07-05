@@ -613,26 +613,26 @@ bool InputManager::load_external_avi_for_play(const char *path) {
 						if (bmp->biCompression == avi_fourcc_const('D','I','V','X') ||
 							bmp->biCompression == avi_fourcc_const('F','M','P','4') ||
 							bmp->biCompression == avi_fourcc_const('X','V','I','D')) {
-							v_ffmpeg_codec_id = CODEC_ID_MPEG4;
+							v_ffmpeg_codec_id = AV_CODEC_ID_MPEG4;
 							fprintf(stderr,"MPEG-4 video stream index %u %u x %u found\n",
 								i,bmp->biWidth,bmp->biHeight);
 							video_stream = i;
 						}
 						else if (bmp->biCompression == avi_fourcc_const('d','i','v','4') ||
 							bmp->biCompression == avi_fourcc_const('D','I','V','3')) {
-							v_ffmpeg_codec_id = CODEC_ID_MSMPEG4V3;
+							v_ffmpeg_codec_id = AV_CODEC_ID_MSMPEG4V3;
 							fprintf(stderr,"DivX/MS-MPEG-4 video stream index %u %u x %u found\n",
 								i,bmp->biWidth,bmp->biHeight);
 							video_stream = i;
 						}
 						else if (bmp->biCompression == avi_fourcc_const('H','2','6','4')) {
-							v_ffmpeg_codec_id = CODEC_ID_H264;
+							v_ffmpeg_codec_id = AV_CODEC_ID_H264;
 							fprintf(stderr,"H.264 video stream index %u %u x %u found\n",
 								i,bmp->biWidth,bmp->biHeight);
 							video_stream = i;
 						}
 						else if (bmp->biCompression == avi_fourcc_const('F','L','V','1')) {
-							v_ffmpeg_codec_id = CODEC_ID_FLV1;
+							v_ffmpeg_codec_id = AV_CODEC_ID_FLV1;
 							fprintf(stderr,"DivX/MS-MPEG-4 video stream index %u %u x %u found\n",
 								i,bmp->biWidth,bmp->biHeight);
 							video_stream = i;
@@ -2590,7 +2590,7 @@ bool put_temp_avi_frame_on_screen(InputManager *input) {
 	bool ret = false;
 
 	if (temp_avi_frame != NULL && temp_avi_frame->width != 0 && temp_avi_frame->height != 0) {
-		if (input->video_avcodec_ctx->pix_fmt == PIX_FMT_YUV420P) {
+		if (input->video_avcodec_ctx->pix_fmt == AV_PIX_FMT_YUV420P) {
 			client_area_check_source_size(temp_avi_frame->width,temp_avi_frame->height);
 
 			if (client_area_xvimage) {
@@ -2647,7 +2647,7 @@ bool put_temp_avi_frame_on_screen(InputManager *input) {
 				}
 			}
 		}
-		else if (input->video_avcodec_ctx->pix_fmt == PIX_FMT_YUV422P) {
+		else if (input->video_avcodec_ctx->pix_fmt == AV_PIX_FMT_YUV422P) {
 			client_area_check_source_size(temp_avi_frame->width,temp_avi_frame->height);
 
 			if (client_area_xvimage) {
@@ -2713,7 +2713,7 @@ void InputManager::codec_check() {
 	if (video_avcodec == NULL) {
 		/* TODO: Support other codecs, if the AVI capture program is using them */
 		close_avcodec();
-		video_avcodec = avcodec_find_decoder(CODEC_ID_H264);
+		video_avcodec = avcodec_find_decoder(AV_CODEC_ID_H264);
 		if (video_avcodec != NULL) {
 			video_avcodec_ctx = avcodec_alloc_context3(video_avcodec);
 			if (video_avcodec_ctx != NULL) {
@@ -2932,7 +2932,7 @@ bool put_play_frame_on_screen(InputManager *input,bool force_redraw) {
 					memset(temp_avi_read+rd,0,1023);
 
 					if (temp_avi_frame == NULL)
-						temp_avi_frame = avcodec_alloc_frame();
+						temp_avi_frame = av_frame_alloc();
 					if (temp_avi_frame != NULL && input->video_avcodec_ctx != NULL) {
 						AVPacket pkt={0};
 						pkt.data = temp_avi_read;
