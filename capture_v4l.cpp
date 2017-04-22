@@ -1941,6 +1941,8 @@ int main(int argc,char **argv) {
 				av_frame.interlaced_frame = (v4l_interlaced >= 0);
 				av_frame.key_frame = (avi_frame_counter % AVI_FRAMES_PER_GROUP) == 0;
 				av_frame.pts = AV_NOPTS_VALUE;
+                av_frame.width = v4l_width;
+                av_frame.height = v4l_height;
 
 				if (v4l_fd >= 0 && live_shm != NULL) {
 					volatile struct live_shm_header *xx = live_shm_head();
