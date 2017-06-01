@@ -2227,9 +2227,10 @@ int main(int argc,char **argv) {
 						for (unsigned int ch=0;ch < (unsigned int)audio_channels;ch++) {
 							audio_sum_level[ch] += (unsigned int)abs(s[ch]);
 							audio_max_level[ch] = std::max(audio_max_level[ch],(unsigned int)abs(s[ch]));
-							audio_sum_count++;
 						}
-					}
+
+                        audio_sum_count++;
+                    }
 
 					if (AVI) {
 						if (AVI_audio) {
