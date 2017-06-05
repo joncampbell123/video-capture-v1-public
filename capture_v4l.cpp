@@ -106,6 +106,7 @@ static int			v4l_codec_yshr = 1;
 static string			v4l_codec_sel,want_codec_sel;		// h264, h264-422
 static bool			v4l_crop_bounds = false;
 static bool			v4l_crop_defrect = false;
+static int			v4l_crop_vcr_hack = 0;
 static int			v4l_crop_x = CROP_DEFAULT;
 static int			v4l_crop_y = CROP_DEFAULT;
 static int			v4l_crop_w = CROP_DEFAULT;
@@ -761,6 +762,7 @@ static void help() {
 	fprintf(stderr,"    -vbi-all                               Capture & record ALL VBI data\n");
 	fprintf(stderr,"    -input-device <x>                      Card input to select\n");
 	fprintf(stderr,"    -input-standard <x>                    Video standard to select\n");
+	fprintf(stderr,"    -vcr-hack <x>                          Crop x lines from bottom\n");
 }
 
 static int parse_argv(int argc,char **argv) {
@@ -776,6 +778,10 @@ static int parse_argv(int argc,char **argv) {
 			if (!strcmp(a,"h") || !strcmp(a,"help") || !strcmp(a,"?")) {
 				help();
 				return 1;
+			}
+			else if (!strcmp(a,"vcr-hack")) {
+				v4l_crop_vcr_hack = atoi(argv[i++]);
+				if (v4l_crop_vcr_hack < 0) v4l_crop_vcr_hack = 0;
 			}
 			else if (!strcmp(a,"vbi")) {
 				capture_vbi = true;
@@ -1065,10 +1071,22 @@ int open_v4l() {
 					fprintf(stderr,"WARNING: Initial crop rectangle setup by driver (upon opening the device) is out of bounds, according to bounds crop rectangle.\n");
 					fprintf(stderr,"         To capture properly, please consider using -cropbounds/-cropdef or setting a crop rectangle.\n");
 				}
+			}
+			else {
+				fprintf(stderr,"Cannot query crop rect\n");
+				memset(&crop,0,sizeof(crop));
+			}
 
+			{
 				if (v4l_crop_bounds) {
 					crop.type = V4L2_BUF_TYPE_VIDEO_CAPTURE;
 					crop.c = cropcap.bounds;
+
+					if (v4l_crop_vcr_hack > 0) {
+						if (crop.c.height > v4l_crop_vcr_hack)
+							crop.c.height -= v4l_crop_vcr_hack;
+					}
+
 					if (ioctl(v4l_fd,VIDIOC_S_CROP,&crop) == 0)
 						fprintf(stderr,"Set bound rect... OK\n");
 					else
@@ -1077,6 +1095,12 @@ int open_v4l() {
 				else if (v4l_crop_defrect) {
 					crop.type = V4L2_BUF_TYPE_VIDEO_CAPTURE;
 					crop.c = cropcap.defrect;
+
+					if (v4l_crop_vcr_hack > 0) {
+						if (crop.c.height > v4l_crop_vcr_hack)
+							crop.c.height -= v4l_crop_vcr_hack;
+					}
+
 					if (ioctl(v4l_fd,VIDIOC_S_CROP,&crop) == 0)
 						fprintf(stderr,"Set def rect... OK\n");
 					else
@@ -1127,9 +1151,6 @@ int open_v4l() {
 					if (final_width <= 0) final_width = crop.c.width;
 					if (final_height <= 0) final_height = crop.c.height;
 				}
-			}
-			else {
-				fprintf(stderr,"Cannot query crop rect\n");
 			}
 		}
 
@@ -1246,6 +1267,19 @@ int open_v4l() {
 
 		if (v4l_buffers == 0)
 			v4l_buffers = 30;
+
+		{
+			struct v4l2_crop crop;
+
+			crop.type = V4L2_BUF_TYPE_VIDEO_CAPTURE;
+			if (ioctl(v4l_fd,VIDIOC_G_CROP,&crop) == 0) {
+				fprintf(stderr,"Crop is now: pos=(%ld,%ld) size=(%ld,%ld)\n",
+						(long)crop.c.left,
+						(long)crop.c.top,
+						(long)crop.c.width,
+						(long)crop.c.height);
+			}
+		}
 
 		memset(reqb.reserved,0,sizeof(reqb.reserved));
 		reqb.count = v4l_buffers;
