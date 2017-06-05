@@ -746,7 +746,7 @@ static void help() {
 	fprintf(stderr,"    -auto-open-avi <n>                     Whether to auto-open AVI output on V4L device\n");
 	fprintf(stderr,"    -auto-open-v4l <n>                     Whether to auto-open V4L device\n");
 	fprintf(stderr,"    -socket <n>                            Socket location\n");
-	fprintf(stderr,"    -weight <n>                            Capture width\n");
+	fprintf(stderr,"    -width <n>                             Capture width\n");
 	fprintf(stderr,"    -height <n>                            Capture height\n");
 	fprintf(stderr,"    -cropbound                             Set crop rect to bounds rect\n");
 	fprintf(stderr,"    -cropdef                               Set crop rect to default rect\n");
@@ -759,6 +759,8 @@ static void help() {
 	fprintf(stderr,"                                                 h264-422  H.264/AVC 4:2:2\n");
 	fprintf(stderr,"    -vbi                                   Also capture & record VBI\n");
 	fprintf(stderr,"    -vbi-all                               Capture & record ALL VBI data\n");
+	fprintf(stderr,"    -input-device <x>                      Card input to select\n");
+	fprintf(stderr,"    -input-standard <x>                    Video standard to select\n");
 }
 
 static int parse_argv(int argc,char **argv) {
