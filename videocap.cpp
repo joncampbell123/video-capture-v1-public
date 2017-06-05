@@ -4581,7 +4581,7 @@ void create_input_dialog() {
 	icon = gtk_image_new_from_stock (GTK_STOCK_DIALOG_WARNING,GTK_ICON_SIZE_SMALL_TOOLBAR);
 	gtk_container_add (GTK_CONTAINER(hbox), icon);
 
-	label = gtk_label_new ("These input settings apply only to the currently selected input");
+	label = gtk_label_new ("These input settings apply only to the currently selected input.\nYou can leave the frame size field unset to use the capture card's default for best quality.");
 	gtk_container_add (GTK_CONTAINER(hbox), label);
 
 	gtk_container_add (GTK_CONTAINER(vbox), hbox);
