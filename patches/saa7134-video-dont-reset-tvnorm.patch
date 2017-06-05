@@ -1,0 +1,13 @@
+diff --git a/drivers/media/pci/saa7134/saa7134-video.c b/drivers/media/pci/saa7134/saa7134-video.c
+index 4b1c432..9ab38c1 100644
+--- a/drivers/media/pci/saa7134/saa7134-video.c
++++ b/drivers/media/pci/saa7134/saa7134-video.c
+@@ -408,7 +408,7 @@ static void video_mux(struct saa7134_dev *dev, int input)
+ 	video_dbg("video input = %d [%s]\n",
+ 		  input, saa7134_input_name[card_in(dev, input).type]);
+ 	dev->ctl_input = input;
+-	set_tvnorm(dev, dev->tvnorm);
++//	set_tvnorm(dev, dev->tvnorm);
+ 	saa7134_tvaudio_setinput(dev, &card_in(dev, input));
+ }
+ 

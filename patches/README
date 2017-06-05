@@ -1,0 +1,12 @@
+This README explains each patch:
+
+
+saa7134-video-dont-reset-tvnorm.patch 
+
+  - As described in NOTES, the saa7134 driver resets the TV norm
+    and therefore the crop rectangle every time the video or vbi
+    device is opened, even if from another process.
+
+    This patch is a quick fix to resolve that, though probably
+    not a long-term solution.
+
