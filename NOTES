@@ -1,0 +1,69 @@
+Video capture notes.
+
+To ensure accurate capture with this software in Linux, you may
+wish to read this. Some drivers have issues, some cards have problems.
+
+- The Linux saa7134 driver (Lifeview/Mercury PCI capture cards)
+
+  - The driver appears to have some off-by-one errors with respect
+    to NTSC capture.
+
+    If you look at the code, it seems to define a default crop
+    rectangle that goes one scanline beyond the end of the active
+    picture area.
+
+    It also defines a boundary crop rectangle (the limits of the
+    hardware) that is 2 frame scanlines up from default.
+
+    Both define a crop width+height of 720x480.
+
+    However, if you read, and then apply the default crop rectangle,
+    the driver will then return a crop rectangle of 720x478. It is
+    only when asked to read and reapply the crop rectangle that the
+    driver then correctly crops it within the limits of NTSC.
+
+    Default crop rectangle: 0x46 720x480
+    Bounds crop rectangle: 0x44 720x480
+    Crop rectangle if default read, then applied to driver: 0x46 720x478
+
+    If a program is not prepared for the issue, and attempts to capture
+    720x480, it will instead get 720x478 with the last two scanlines
+    uninitialized, and a fuzzy picture caused by the mismatch in
+    dimensions triggering the card to scale and interpolate the video.
+
+    The other issue this causes is that, if you are capturing video
+    to preserve both VBI and active picture area, this off by one
+    mistake means that your capture will miss line 22. The VBI capture
+    will contain lines 10-21 and the active picture area will contain
+    lines 23-261, but line 22 will be skipped over. Setting the crop
+    rectangle to the bounds rectangle can reenable capture of line 22
+    and full capture of the video.
+
+    If you have one of these cards and the saa7134 driver, it is
+    strongly recommended that you compensate for this issue by
+    checking the 'Use boundary crop rectangle' option in the UI's
+    input settings or by using the -cropbounds option at the command
+    line.
+
+    In extreme cases, this issue eventually causes video capture to
+    stop entirely (especially if VBI is involved). Video capture will
+    not work unless you unload and reload the saa7134 driver, or in
+    some extreme cases, restart the system.
+
+  - The video capture card is not very tolerant of unstable or bad
+    video sources. For example, if you wish to capture and digitize
+    a VHS source and the VHS tape came from a VCR with any sort of
+    tracking error or the video source has interference or noise,
+    this capture card will not handle it very well. You will get
+    frame drops. Use a different capture card instead.
+
+    However if the VHS source is clean and stable, it will work fine.
+
+  - This video capture card also has a strange issue with video sources
+    coming from Laserdisc. It will not drop frames, however it has
+    trouble locking onto the color subcarrier for some reason. This
+    issue shows itself as the color going in and out periodically.
+    The video will alternate between normal display, and display without
+    decoding the color (you will see the color subcarrier in the
+    black and white image).
+
