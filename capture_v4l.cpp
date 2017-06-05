@@ -2104,6 +2104,8 @@ int main(int argc,char **argv) {
 			memset(&av_frame,0,sizeof(av_frame));
 			av_frame.key_frame = (avi_vbi_frame_counter % AVI_FRAMES_PER_GROUP) == 0;
 			av_frame.pts = AV_NOPTS_VALUE;
+			av_frame.width = vbi_width;
+			av_frame.height = v4l_vbi_capfmt.fmt.vbi.count[0] + v4l_vbi_capfmt.fmt.vbi.count[1];
 
 			assert(vbi_read_field <= 1);
 			expect = vbi_stride * v4l_vbi_capfmt.fmt.vbi.count[vbi_read_field];
