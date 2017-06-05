@@ -67,3 +67,10 @@ wish to read this. Some drivers have issues, some cards have problems.
     decoding the color (you will see the color subcarrier in the
     black and white image).
 
+- Happauge ImpactVCB-e
+
+ - Nice capture card. The driver offers both video and VBI capture,
+   but for some reason the cx23885 driver with this card is unable
+   to initiate VBI capture. You can open capture and try to read,
+   but no data will come back. Video capture works fine though.
+
