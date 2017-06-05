@@ -81,6 +81,11 @@ wish to read this. Some drivers have issues, some cards have problems.
     either the video or vbi device, then the crop rectangle is
     reset.
 
+  - This capture card, if the saa7134 driver is right, apparently
+    does not like capturing VBI and video data one after the other.
+    Setting the crop rectangle so that it starts on the first
+    scanline following VBI causes capture not to work at all.
+
 - Happauge ImpactVCB-e
 
  - Nice capture card. The driver offers both video and VBI capture,
