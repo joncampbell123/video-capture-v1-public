@@ -673,6 +673,40 @@ static void open_avi_file() {
 			}
 		}
 
+		{
+			const char *field_str = "";
+			char px[5];
+
+			*((uint32_t*)px) = v4l_fmt.fmt.pix.pixelformat;
+			px[4] = 0;
+
+			switch (v4l_fmt.fmt.pix.field) {
+				case V4L2_FIELD_ANY:		field_str = "any"; break;
+				case V4L2_FIELD_NONE:		field_str = "none"; break;
+				case V4L2_FIELD_TOP:		field_str = "top"; break;
+				case V4L2_FIELD_BOTTOM:		field_str = "bottom"; break;
+				case V4L2_FIELD_INTERLACED:	field_str = "interlaced"; break;
+				case V4L2_FIELD_SEQ_TB:		field_str = "seq-tb"; break;
+				case V4L2_FIELD_SEQ_BT:		field_str = "seq-bt"; break;
+				case V4L2_FIELD_ALTERNATE:	field_str = "alternate"; break;
+				case V4L2_FIELD_INTERLACED_TB:	field_str = "interlaced-tb"; break;
+				case V4L2_FIELD_INTERLACED_BT:	field_str = "interlaced-bt"; break;
+			};
+
+			sprintf(tmp,"w=%u h=%u stride=%u size=%u pixfmt='%s' field='%s'",
+					(unsigned int)v4l_fmt.fmt.pix.width,
+					(unsigned int)v4l_fmt.fmt.pix.height,
+					(unsigned int)v4l_fmt.fmt.pix.bytesperline,
+					(unsigned int)v4l_fmt.fmt.pix.sizeimage,
+					px,field_str);
+
+			riff_stack_begin_new_chunk_here(AVI->riff,&chunk);
+			riff_stack_set_chunk_data_type(&chunk,avi_fourcc_const('V','C','N','F')); /* video capture info */
+			riff_stack_push(AVI->riff,&chunk);
+			riff_stack_write(AVI->riff,riff_stack_top(AVI->riff),tmp,strlen(tmp));
+			riff_stack_pop(AVI->riff);
+		}
+
 		if (write_vbi) {
 			sprintf(tmp,"VBI %u+%u %u+%u",
 					vbifmt.fmt.vbi.start[0],
