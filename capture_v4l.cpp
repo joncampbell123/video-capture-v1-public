@@ -915,6 +915,69 @@ void capture_vbi_open(void) {
 			fprintf(stderr,"Failed to open VBI device %s, %s\n",tmp,strerror(errno));
 		}
 	}
+
+	if (vbi_fd >= 0) {
+		v4l_vbi_capfmt.type = V4L2_BUF_TYPE_VBI_CAPTURE;
+		if (ioctl(vbi_fd,VIDIOC_G_FMT,&v4l_vbi_capfmt)) {
+			fprintf(stderr,"Failed to query VBI format\n");
+			close(vbi_fd);
+			vbi_fd = -1;
+		}
+		else {
+			fprintf(stderr,"VBI format:\n");
+			fprintf(stderr,"   sampling_rate: %uHz\n",v4l_vbi_capfmt.fmt.vbi.sampling_rate);
+			fprintf(stderr,"   offset:        %u\n",v4l_vbi_capfmt.fmt.vbi.offset);
+			fprintf(stderr,"   samples/line:  %u\n",v4l_vbi_capfmt.fmt.vbi.samples_per_line);
+			fprintf(stderr,"   sample_fmt:    0x%x\n",v4l_vbi_capfmt.fmt.vbi.sample_format);
+			fprintf(stderr,"   start:         %u, %u\n",v4l_vbi_capfmt.fmt.vbi.start[0],v4l_vbi_capfmt.fmt.vbi.start[1]);
+			fprintf(stderr,"   count:         %u, %u\n",v4l_vbi_capfmt.fmt.vbi.count[0],v4l_vbi_capfmt.fmt.vbi.count[1]);
+			fprintf(stderr,"   flags:         0x%x\n",v4l_vbi_capfmt.fmt.vbi.flags);
+
+			/* we want grayscsale */
+			v4l_vbi_capfmt.fmt.vbi.sample_format = V4L2_PIX_FMT_GREY;
+			if (ioctl(vbi_fd,VIDIOC_S_FMT,&v4l_vbi_capfmt))
+				fprintf(stderr,"Failed to set VBI format (set fmt to grey)\n");
+			if (ioctl(vbi_fd,VIDIOC_G_FMT,&v4l_vbi_capfmt))
+				fprintf(stderr,"Failed to get VBI format again\n");
+
+			/* now... stride vs width vs height */
+			/* note some capture cards in my collection will capture something like 1500 samples per line but
+			 * return it as a bitmap 2048 bytes/line! Um.... but apparently that's been fixed? */
+			vbi_height = v4l_vbi_capfmt.fmt.vbi.count[0] + v4l_vbi_capfmt.fmt.vbi.count[1];
+			vbi_stride = v4l_vbi_capfmt.fmt.vbi.samples_per_line;
+
+			if (capture_all_vbi) {
+				// in case the capture card has the wrong info, use ALL the raw data
+				vbi_width = vbi_stride;
+			}
+			else {
+				vbi_width = v4l_vbi_capfmt.fmt.vbi.sampling_rate / 15750; // sample rate vs 15.750KHz NTSC horizontal sync rate
+				vbi_width -= v4l_vbi_capfmt.fmt.vbi.offset;
+			}
+
+			vbi_width += 15;
+			vbi_width -= vbi_width % 16;
+			fprintf(stderr,"VBI width %u stride %u height %u\n",
+				vbi_width,
+				vbi_stride,
+				vbi_height);
+
+			if (vbi_width <= 128 || vbi_stride <= 128 || vbi_height < 1) {
+				fprintf(stderr,"VBI area too small\n");
+				close(vbi_fd);
+				vbi_fd = -1;
+			}
+
+			if (vbi_fd >= 0) {
+				/* non-block */
+				fcntl(vbi_fd,F_SETFL, fcntl(vbi_fd,F_GETFL) | O_NONBLOCK);
+
+				assert(vbi_buffer == NULL);
+				vbi_buffer = new unsigned char [vbi_width * (vbi_height+64)];
+				vbi_read_field = 0;
+			}
+		}
+	}
 }
 
 void close_v4l() {
@@ -1479,69 +1542,6 @@ int open_v4l() {
 
 	if (capture_vbi && vbi_fd < 0)
 		capture_vbi_open();
-
-	if (vbi_fd >= 0) {
-		v4l_vbi_capfmt.type = V4L2_BUF_TYPE_VBI_CAPTURE;
-		if (ioctl(vbi_fd,VIDIOC_G_FMT,&v4l_vbi_capfmt)) {
-			fprintf(stderr,"Failed to query VBI format\n");
-			close(vbi_fd);
-			vbi_fd = -1;
-		}
-		else {
-			fprintf(stderr,"VBI format:\n");
-			fprintf(stderr,"   sampling_rate: %uHz\n",v4l_vbi_capfmt.fmt.vbi.sampling_rate);
-			fprintf(stderr,"   offset:        %u\n",v4l_vbi_capfmt.fmt.vbi.offset);
-			fprintf(stderr,"   samples/line:  %u\n",v4l_vbi_capfmt.fmt.vbi.samples_per_line);
-			fprintf(stderr,"   sample_fmt:    0x%x\n",v4l_vbi_capfmt.fmt.vbi.sample_format);
-			fprintf(stderr,"   start:         %u, %u\n",v4l_vbi_capfmt.fmt.vbi.start[0],v4l_vbi_capfmt.fmt.vbi.start[1]);
-			fprintf(stderr,"   count:         %u, %u\n",v4l_vbi_capfmt.fmt.vbi.count[0],v4l_vbi_capfmt.fmt.vbi.count[1]);
-			fprintf(stderr,"   flags:         0x%x\n",v4l_vbi_capfmt.fmt.vbi.flags);
-
-			/* we want grayscsale */
-			v4l_vbi_capfmt.fmt.vbi.sample_format = V4L2_PIX_FMT_GREY;
-			if (ioctl(vbi_fd,VIDIOC_S_FMT,&v4l_vbi_capfmt))
-				fprintf(stderr,"Failed to set VBI format (set fmt to grey)\n");
-			if (ioctl(vbi_fd,VIDIOC_G_FMT,&v4l_vbi_capfmt))
-				fprintf(stderr,"Failed to get VBI format again\n");
-
-			/* now... stride vs width vs height */
-			/* note some capture cards in my collection will capture something like 1500 samples per line but
-			 * return it as a bitmap 2048 bytes/line! Um.... but apparently that's been fixed? */
-			vbi_height = v4l_vbi_capfmt.fmt.vbi.count[0] + v4l_vbi_capfmt.fmt.vbi.count[1];
-			vbi_stride = v4l_vbi_capfmt.fmt.vbi.samples_per_line;
-
-			if (capture_all_vbi) {
-				// in case the capture card has the wrong info, use ALL the raw data
-				vbi_width = vbi_stride;
-			}
-			else {
-				vbi_width = v4l_vbi_capfmt.fmt.vbi.sampling_rate / 15750; // sample rate vs 15.750KHz NTSC horizontal sync rate
-				vbi_width -= v4l_vbi_capfmt.fmt.vbi.offset;
-			}
-
-			vbi_width += 15;
-			vbi_width -= vbi_width % 16;
-			fprintf(stderr,"VBI width %u stride %u height %u\n",
-				vbi_width,
-				vbi_stride,
-				vbi_height);
-
-			if (vbi_width <= 128 || vbi_stride <= 128 || vbi_height < 1) {
-				fprintf(stderr,"VBI area too small\n");
-				close(vbi_fd);
-				vbi_fd = -1;
-			}
-
-			if (vbi_fd >= 0) {
-				/* non-block */
-				fcntl(vbi_fd,F_SETFL, fcntl(vbi_fd,F_GETFL) | O_NONBLOCK);
-
-				assert(vbi_buffer == NULL);
-				vbi_buffer = new unsigned char [vbi_width * (vbi_height+64)];
-				vbi_read_field = 0;
-			}
-		}
-	}
 
 	if (!audio_device.empty()) {
 		const char *name;
