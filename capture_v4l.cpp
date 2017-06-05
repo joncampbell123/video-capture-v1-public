@@ -1037,6 +1037,17 @@ int open_v4l() {
 		{
 			struct v4l2_crop crop;
 
+			/* if we see that the capture card defines a default crop rectangle that
+			 * doesn't fit it's own bounds crop rectangle, then say so, because that's
+			 * a stupid mistake. Isn't that right, saa7134? */
+			if (	cropcap.defrect.left < cropcap.bounds.left ||
+				cropcap.defrect.top  < cropcap.bounds.top ||
+				(cropcap.defrect.left+cropcap.defrect.width) > (cropcap.bounds.left+cropcap.bounds.width) ||
+				(cropcap.defrect.top+cropcap.defrect.height) > (cropcap.bounds.top+cropcap.bounds.height)) {
+				fprintf(stderr,"WARNING: Default crop rectangle is out of bounds, according to bounds crop rectangle.\n");
+				fprintf(stderr,"         To capture properly, please consider using -cropbounds or setting a crop rectangle.\n");
+			}
+
 			crop.type = V4L2_BUF_TYPE_VIDEO_CAPTURE;
 			if (ioctl(v4l_fd,VIDIOC_G_CROP,&crop) == 0) {
 				fprintf(stderr,"Crop is currently: pos=(%ld,%ld) size=(%ld,%ld)\n",
@@ -1044,6 +1055,16 @@ int open_v4l() {
 					(long)crop.c.top,
 					(long)crop.c.width,
 					(long)crop.c.height);
+
+				/* check for saa7134 stupidity where the crop rectangle it
+				 * initialized when we opened the device doesn't fit it's own bounds crop rectangle */
+				if (	crop.c.left < cropcap.bounds.left ||
+					crop.c.top <  cropcap.bounds.top ||
+					(crop.c.left+crop.c.width) > (cropcap.bounds.left+cropcap.bounds.width) ||
+					(crop.c.top+crop.c.height) > (cropcap.bounds.top+cropcap.bounds.height)) {
+					fprintf(stderr,"WARNING: Initial crop rectangle setup by driver (upon opening the device) is out of bounds, according to bounds crop rectangle.\n");
+					fprintf(stderr,"         To capture properly, please consider using -cropbounds/-cropdef or setting a crop rectangle.\n");
+				}
 
 				if (v4l_crop_bounds) {
 					crop.type = V4L2_BUF_TYPE_VIDEO_CAPTURE;
@@ -1060,6 +1081,20 @@ int open_v4l() {
 						fprintf(stderr,"Set def rect... OK\n");
 					else
 						fprintf(stderr,"Failed to set def rect\n");
+
+					/* look for saa7134 stupidity.
+					 * it will specify a default rect, then when we apply it,
+					 * it will crop to the bounds rect and we'll unexpectedly
+					 * get back a different rect 2 scanlines shorter. */
+					crop.type = V4L2_BUF_TYPE_VIDEO_CAPTURE;
+					if (ioctl(v4l_fd,VIDIOC_G_CROP,&crop) == 0) {
+						if (	crop.c.left != cropcap.defrect.left ||
+							crop.c.top != cropcap.defrect.top ||
+							crop.c.width != cropcap.defrect.width ||
+							crop.c.height != cropcap.defrect.height) {
+							fprintf(stderr,"Um... capture card driver rejects it's own default crop rectangle. Okay then...\n");
+						}
+					}
 				}
 				else if (v4l_crop_x != CROP_DEFAULT || v4l_crop_y != CROP_DEFAULT ||
 					v4l_crop_w != CROP_DEFAULT || v4l_crop_h != CROP_DEFAULT) {
