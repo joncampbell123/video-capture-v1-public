@@ -77,6 +77,10 @@ wish to read this. Some drivers have issues, some cards have problems.
     input and tv standard settings and therefore resets the crop
     rectangle.
 
+    This is not specific to one process. If another process opens
+    either the video or vbi device, then the crop rectangle is
+    reset.
+
 - Happauge ImpactVCB-e
 
  - Nice capture card. The driver offers both video and VBI capture,

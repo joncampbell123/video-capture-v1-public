@@ -236,6 +236,7 @@ public:
 	bool				crop_defrect;
 	int				crop_left,crop_top,crop_width,crop_height;
 	std::string			input_codec;
+	std::string			vcrhack;
 
 	/* video capture info */
 	video_tracking			vt_play,vt_rec;			/* independent indexes for playback and recording */
@@ -282,6 +283,7 @@ GtkWidget*			input_dialog_device = NULL;
 GtkWidget*			input_dialog_standard = NULL;
 GtkWidget*			input_dialog_capres = NULL;
 GtkWidget*			input_dialog_codec = NULL;
+GtkWidget*			input_dialog_vcrhack = NULL;
 GtkWidget*			input_dialog_vbi_enable = NULL;
 GtkWidget*			input_dialog_def_crop = NULL;
 GtkWidget*			input_dialog_bounds_crop = NULL;
@@ -839,6 +841,8 @@ void load_config_section_input(const char *name,const char *value) {
 		iobj->capture_height = atoi(value);
 	else if (!strcmp(name,"codec"))
 		iobj->input_codec = value;
+	else if (!strcmp(name,"vcr hack"))
+		iobj->vcrhack = value;
 	else if (!strcmp(name,"crop")) {
 		iobj->crop_defrect = iobj->crop_bounds = false;
 		iobj->crop_left = iobj->crop_top = iobj->crop_width = iobj->crop_height = CROP_DEFAULT;
@@ -1024,6 +1028,7 @@ void save_configuration() {
 			fprintf(fp,"input standard = %s\n",iobj->input_standard.c_str());
 			fprintf(fp,"capture width = %d\n",iobj->capture_width);
 			fprintf(fp,"capture height = %d\n",iobj->capture_height);
+			fprintf(fp,"vcr hack = %s\n",iobj->vcrhack.c_str());
 			fprintf(fp,"codec = %s\n",iobj->input_codec.c_str());
 
 			fprintf(fp,"crop = ");
@@ -3170,6 +3175,11 @@ bool InputManager::start_process() {
 		argv[argc++] = input_standard.c_str();
 	}
 
+	if (!vcrhack.empty()) {
+		argv[argc++] = "--vcr-hack";
+		argv[argc++] = vcrhack.c_str();
+	}
+
 	if (!input_codec.empty()) {
 		argv[argc++] = "--codec";
 		argv[argc++] = input_codec.c_str();
@@ -3819,6 +3829,51 @@ static void on_main_window_file_quit(GtkMenuItem *menuitem,gpointer user_data) {
 		gtk_main_quit();
 }
 
+static gint v4l_vcrhack_dropdown_populate_and_select(GtkWidget *listbox,GtkListStore *list) {
+	static const char *modelist[] = {
+		"2-line VCR hack",
+		"4",
+		"6",
+		"8",
+		"10",
+		"12",
+		"14",
+		"16",
+		"18",
+		"20",
+		"32",
+		"48",
+		"64",
+		"80",
+		"128",
+		"160",
+		"192",
+		"240",
+		"300",
+		"350",
+		NULL
+	};
+	void **hints,**n;
+	GtkTreeIter iter;
+	gint active = -1;
+	int count = 0;
+	int index;
+
+	gtk_list_store_append(list, &iter);
+	gtk_list_store_set(list, &iter, /*column*/0, "", -1);
+	if (active < 0 && CurrentInputObj()->vcrhack == "") active = 0;
+	count++;
+
+	for (index=0;modelist[index] != NULL;index++) {
+		gtk_list_store_append(list, &iter);
+		gtk_list_store_set(list, &iter, /*column*/0, modelist[index], -1);
+		if (active < 0 && CurrentInputObj()->vcrhack == modelist[index]) active = count;
+		count++;
+	}
+
+	return active;
+}
+
 static gint v4l_codec_dropdown_populate_and_select(GtkWidget *listbox,GtkListStore *list) {
 	static const char *modelist[] = {
 		"h264",
@@ -4137,6 +4192,20 @@ static void update_input_dialog_from_vars() {
 	gtk_combo_box_set_model (GTK_COMBO_BOX(input_dialog_codec), model);
 
 	gtk_combo_box_set_active (GTK_COMBO_BOX(input_dialog_codec), active);
+
+	/* vcr hack */
+	model = gtk_combo_box_get_model (GTK_COMBO_BOX(input_dialog_vcrhack));
+	if (model != NULL) {
+		gtk_list_store_clear (GTK_LIST_STORE(model));
+		gtk_combo_box_set_model (GTK_COMBO_BOX(input_dialog_vcrhack), model);
+	}
+
+	model = GTK_TREE_MODEL(gtk_list_store_new (2, G_TYPE_STRING, G_TYPE_STRING));
+	assert(model != NULL);
+	active = v4l_vcrhack_dropdown_populate_and_select (input_dialog_vcrhack, GTK_LIST_STORE(model));
+	gtk_combo_box_set_model (GTK_COMBO_BOX(input_dialog_vcrhack), model);
+
+	gtk_combo_box_set_active (GTK_COMBO_BOX(input_dialog_vcrhack), active);
 }
 
 static void update_x_dialog_from_vars() {
@@ -4272,6 +4341,32 @@ static bool update_vars_from_input_dialog() {
 	}
 
 	if (old_input_codec != CurrentInputObj()->input_codec)
+		do_reopen = true;
+
+	/* vcrhack */
+	active = gtk_combo_box_get_active (GTK_COMBO_BOX(input_dialog_vcrhack));
+	model = gtk_combo_box_get_model (GTK_COMBO_BOX(input_dialog_vcrhack));
+
+	std::string old_vcrhack = CurrentInputObj()->vcrhack;
+
+	CurrentInputObj()->vcrhack.clear();
+	if (model != NULL && active >= 0) {
+		GtkTreeIter iter;
+		char *str;
+		GValue v;
+
+		memset(&v,0,sizeof(v));
+		if (gtk_tree_model_iter_nth_child(model,&iter,NULL,active) == TRUE) {
+			gtk_tree_model_get_value(model,&iter,0,&v);
+			str = (char*)g_value_get_string(&v);
+			if (str) CurrentInputObj()->vcrhack = str;
+			fprintf(stderr,"updated input codec is '%s'\n",str);
+		}
+
+		g_value_unset(&v);
+	}
+
+	if (old_vcrhack != CurrentInputObj()->vcrhack)
 		do_reopen = true;
 
 	/* reopen */
@@ -4534,6 +4629,22 @@ void create_input_dialog() {
 		cell = gtk_cell_renderer_text_new();
 		gtk_cell_layout_pack_start(GTK_CELL_LAYOUT(input_dialog_codec), cell, TRUE);
 		gtk_cell_layout_set_attributes(GTK_CELL_LAYOUT(input_dialog_codec), cell, "text", 0, NULL);
+	}
+
+	gtk_container_add (GTK_CONTAINER(vbox), hbox);
+
+	/* vcr hack */
+	hbox = gtk_hbox_new (FALSE, 0);
+
+	input_dialog_vcrhack = gtk_combo_box_new ();
+	gtk_container_add (GTK_CONTAINER(hbox), input_dialog_vcrhack);
+
+	{
+		GtkCellRenderer *cell;
+
+		cell = gtk_cell_renderer_text_new();
+		gtk_cell_layout_pack_start(GTK_CELL_LAYOUT(input_dialog_vcrhack), cell, TRUE);
+		gtk_cell_layout_set_attributes(GTK_CELL_LAYOUT(input_dialog_vcrhack), cell, "text", 0, NULL);
 	}
 
 	gtk_container_add (GTK_CONTAINER(vbox), hbox);
