@@ -283,6 +283,8 @@ GtkWidget*			input_dialog_standard = NULL;
 GtkWidget*			input_dialog_capres = NULL;
 GtkWidget*			input_dialog_codec = NULL;
 GtkWidget*			input_dialog_vbi_enable = NULL;
+GtkWidget*			input_dialog_def_crop = NULL;
+GtkWidget*			input_dialog_bounds_crop = NULL;
 GtkWidget*			audio_dialog = NULL;
 GtkWidget*			audio_dialog_device = NULL;
 GtkWidget*			audio_dialog_enable = NULL;
@@ -4077,6 +4079,8 @@ static void update_input_dialog_from_vars() {
 	gtk_window_set_title (GTK_WINDOW(input_dialog), tmp);
 
 	gtk_toggle_button_set_active (GTK_TOGGLE_BUTTON(input_dialog_vbi_enable), CurrentInputObj()->enable_vbi);
+	gtk_toggle_button_set_active (GTK_TOGGLE_BUTTON(input_dialog_def_crop), CurrentInputObj()->crop_defrect);
+	gtk_toggle_button_set_active (GTK_TOGGLE_BUTTON(input_dialog_bounds_crop), CurrentInputObj()->crop_bounds);
 
 	/* input select */
 	model = gtk_combo_box_get_model (GTK_COMBO_BOX(input_dialog_device));
@@ -4151,6 +4155,14 @@ static bool update_vars_from_input_dialog() {
 	tmp = gtk_toggle_button_get_active (GTK_TOGGLE_BUTTON(input_dialog_vbi_enable)) > 0;
 	if (tmp != CurrentInputObj()->enable_vbi) do_reopen = true;
 	CurrentInputObj()->enable_vbi = tmp;
+
+	tmp = gtk_toggle_button_get_active (GTK_TOGGLE_BUTTON(input_dialog_def_crop)) > 0;
+	if (tmp != CurrentInputObj()->crop_defrect) do_reopen = true;
+	CurrentInputObj()->crop_defrect = tmp;
+
+	tmp = gtk_toggle_button_get_active (GTK_TOGGLE_BUTTON(input_dialog_bounds_crop)) > 0;
+	if (tmp != CurrentInputObj()->crop_bounds) do_reopen = true;
+	CurrentInputObj()->crop_bounds = tmp;
 
 	/* input */
 	active = gtk_combo_box_get_active (GTK_COMBO_BOX(input_dialog_device));
@@ -4531,6 +4543,22 @@ void create_input_dialog() {
 
 	input_dialog_vbi_enable = gtk_check_button_new_with_label ("Enable VBI capture");
 	gtk_container_add (GTK_CONTAINER(hbox), input_dialog_vbi_enable);
+
+	gtk_container_add (GTK_CONTAINER(vbox), hbox);
+
+
+	hbox = gtk_hbox_new (FALSE, 0);
+
+	input_dialog_def_crop = gtk_check_button_new_with_label ("Use default crop rectangle");
+	gtk_container_add (GTK_CONTAINER(hbox), input_dialog_def_crop);
+
+	gtk_container_add (GTK_CONTAINER(vbox), hbox);
+
+
+	hbox = gtk_hbox_new (FALSE, 0);
+
+	input_dialog_bounds_crop = gtk_check_button_new_with_label ("Use boundary crop rectangle");
+	gtk_container_add (GTK_CONTAINER(hbox), input_dialog_bounds_crop);
 
 	gtk_container_add (GTK_CONTAINER(vbox), hbox);
 
