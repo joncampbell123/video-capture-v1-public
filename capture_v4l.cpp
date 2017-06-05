@@ -106,6 +106,7 @@ static int			v4l_codec_yshr = 1;
 static string			v4l_codec_sel,want_codec_sel;		// h264, h264-422
 static bool			v4l_crop_bounds = false;
 static bool			v4l_crop_defrect = false;
+static int			v4l_open_vbi_first = -1;		// -1 = auto  0 = no  1 = yes
 static int			v4l_crop_vcr_hack = 0;
 static int			v4l_crop_x = CROP_DEFAULT;
 static int			v4l_crop_y = CROP_DEFAULT;
@@ -763,6 +764,7 @@ static void help() {
 	fprintf(stderr,"    -input-device <x>                      Card input to select\n");
 	fprintf(stderr,"    -input-standard <x>                    Video standard to select\n");
 	fprintf(stderr,"    -vcr-hack <x>                          Crop x lines from bottom\n");
+	fprintf(stderr,"    -vbi-first <x>                         Open VBI first, then init video (1=yes 0=no -1=auto)\n");
 }
 
 static int parse_argv(int argc,char **argv) {
@@ -778,6 +780,9 @@ static int parse_argv(int argc,char **argv) {
 			if (!strcmp(a,"h") || !strcmp(a,"help") || !strcmp(a,"?")) {
 				help();
 				return 1;
+			}
+			else if (!strcmp(a,"vbi-first")) {
+				v4l_open_vbi_first = atoi(argv[i++]);
 			}
 			else if (!strcmp(a,"vcr-hack")) {
 				v4l_crop_vcr_hack = atoi(argv[i++]);
@@ -881,6 +886,37 @@ static int parse_argv(int argc,char **argv) {
 	return 0;
 }
 
+void capture_vbi_open(void) {
+	if (capture_vbi) {
+		char tmp[64];
+
+		fprintf(stderr,"Opening VBI device\n");
+
+		sprintf(tmp,"/dev/vbi%u",v4l_index);
+		vbi_fd = open(tmp,O_RDWR);
+		if (vbi_fd >= 0) {
+			fprintf(stderr,"VBI device %s open\n",tmp);
+
+			memset(&v4l_vbi_cap,0,sizeof(v4l_vbi_cap));
+			if (ioctl(vbi_fd,VIDIOC_QUERYCAP,&v4l_vbi_cap) == 0) {
+				if (!(v4l_vbi_cap.capabilities & V4L2_CAP_VBI_CAPTURE)) {
+					fprintf(stderr,"Device does not support VBI capture\n");
+					close(vbi_fd);
+					vbi_fd = -1;
+				}
+			}
+			else {
+				fprintf(stderr,"Unable to query VBI\n");
+				close(vbi_fd);
+				vbi_fd = -1;
+			}
+		}
+		else {
+			fprintf(stderr,"Failed to open VBI device %s, %s\n",tmp,strerror(errno));
+		}
+	}
+}
+
 void close_v4l() {
 	int i,x;
 
@@ -953,6 +989,29 @@ int open_v4l() {
 		else if (!(v4l_caps.capabilities & V4L2_CAP_STREAMING)) {
 			fprintf(stderr,"ERROR: Does not support streaming capture\n");
 			goto fail;
+		}
+
+		/* saa7134 hack:
+		 *
+		 * the driver resets the crop rectangle when it re-applies the TV standard.
+		 * That is understandable, however it does this also when changing the input,
+		 * and it does it on opening the vbi or video device.
+		 *
+		 * The problem is that, if we open and set up the video device, THEN set up
+		 * the vbi capture, the VBI capture will trigger the TV standard setup which
+		 * will then reset our crop rectangle and then it's almost as if we never
+		 * changing it from the default.
+		 *
+		 * So, if we see the saa7134 driver here, we open the VBI device NOW to avoid
+		 * that problem. */
+		if (v4l_open_vbi_first > 0)
+			capture_vbi_open();
+		else if (v4l_open_vbi_first < 0) {
+			/* auto setting */
+			if (!strcmp((char*)v4l_caps.driver,"saa7134")) {
+				fprintf(stderr,"saa7134 driver detected, opening VBI device NOW to avoid crop rectangle bugs\n");
+				capture_vbi_open();
+			}
 		}
 
 		if (!input_device.empty()) {
@@ -1418,32 +1477,8 @@ int open_v4l() {
 		}
 	}
 
-	if (capture_vbi) {
-		char tmp[64];
-
-		sprintf(tmp,"/dev/vbi%u",v4l_index);
-		vbi_fd = open(tmp,O_RDWR);
-		if (vbi_fd >= 0) {
-			fprintf(stderr,"VBI device %s open\n",tmp);
-
-			memset(&v4l_vbi_cap,0,sizeof(v4l_vbi_cap));
-			if (ioctl(vbi_fd,VIDIOC_QUERYCAP,&v4l_vbi_cap) == 0) {
-				if (!(v4l_vbi_cap.capabilities & V4L2_CAP_VBI_CAPTURE)) {
-					fprintf(stderr,"Device does not support VBI capture\n");
-					close(vbi_fd);
-					vbi_fd = -1;
-				}
-			}
-			else {
-				fprintf(stderr,"Unable to query VBI\n");
-				close(vbi_fd);
-				vbi_fd = -1;
-			}
-		}
-		else {
-			fprintf(stderr,"Failed to open VBI device %s, %s\n",tmp,strerror(errno));
-		}
-	}
+	if (capture_vbi && vbi_fd < 0)
+		capture_vbi_open();
 
 	if (vbi_fd >= 0) {
 		v4l_vbi_capfmt.type = V4L2_BUF_TYPE_VBI_CAPTURE;

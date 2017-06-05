@@ -67,6 +67,16 @@ wish to read this. Some drivers have issues, some cards have problems.
     decoding the color (you will see the color subcarrier in the
     black and white image).
 
+  - The video capture driver has a bug where, if you open and setup
+    video capture, then open the vbi device, the opening of the vbi
+    device resets the crop rectangle you set on the video device.
+    This is a problem, especially if you are trying to compensate
+    for the crop rectangle bug already mentioned above.
+
+    video and vbi open call a "video mux init" which re-applies the
+    input and tv standard settings and therefore resets the crop
+    rectangle.
+
 - Happauge ImpactVCB-e
 
  - Nice capture card. The driver offers both video and VBI capture,
