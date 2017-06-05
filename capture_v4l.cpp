@@ -627,6 +627,52 @@ static void open_avi_file() {
 			riff_stack_pop(AVI->riff);
 		}
 
+		/* it would be good for archiving purposes to record exactly which scanlines
+		 * the capture card is returning to us. */
+		{
+			struct v4l2_crop crop;
+
+			memset(&crop,0,sizeof(crop));
+			crop.type = V4L2_BUF_TYPE_VIDEO_CAPTURE;
+			if (ioctl(v4l_fd,VIDIOC_G_CROP,&crop) == 0) {
+				sprintf(tmp,"CROP %ux%u+%ux%u",
+						(unsigned int)crop.c.left,
+						(unsigned int)crop.c.top,
+						(unsigned int)crop.c.width,
+						(unsigned int)crop.c.height);
+
+				riff_stack_begin_new_chunk_here(AVI->riff,&chunk);
+				riff_stack_set_chunk_data_type(&chunk,avi_fourcc_const('V','C','R','P')); /* video crop at the time of capture */
+				riff_stack_push(AVI->riff,&chunk);
+				riff_stack_write(AVI->riff,riff_stack_top(AVI->riff),tmp,strlen(tmp));
+				riff_stack_pop(AVI->riff);
+			}
+		}
+
+		{
+			struct v4l2_cropcap cropcap;
+
+			memset(&cropcap,0,sizeof(cropcap));
+			cropcap.type = V4L2_BUF_TYPE_VIDEO_CAPTURE;
+			if (ioctl(v4l_fd,VIDIOC_CROPCAP,&cropcap) >= 0) {
+				sprintf(tmp,"CROPCAP bounds=%ux%u+%ux%u, default=%ux%u+%ux%u",
+						(unsigned int)cropcap.bounds.left,
+						(unsigned int)cropcap.bounds.top,
+						(unsigned int)cropcap.bounds.width,
+						(unsigned int)cropcap.bounds.height,
+						(unsigned int)cropcap.defrect.left,
+						(unsigned int)cropcap.defrect.top,
+						(unsigned int)cropcap.defrect.width,
+						(unsigned int)cropcap.defrect.height);
+
+				riff_stack_begin_new_chunk_here(AVI->riff,&chunk);
+				riff_stack_set_chunk_data_type(&chunk,avi_fourcc_const('V','C','R','C')); /* video crop caps */
+				riff_stack_push(AVI->riff,&chunk);
+				riff_stack_write(AVI->riff,riff_stack_top(AVI->riff),tmp,strlen(tmp));
+				riff_stack_pop(AVI->riff);
+			}
+		}
+
 		if (write_vbi) {
 			sprintf(tmp,"VBI %u+%u %u+%u",
 					vbifmt.fmt.vbi.start[0],
