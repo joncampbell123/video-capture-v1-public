@@ -17,6 +17,7 @@
 #include <stdlib.h>
 #include <string.h>
 #include <assert.h>
+#include <dirent.h>
 #include <errno.h>
 #include <stdio.h>
 #include <fcntl.h>
@@ -99,6 +100,7 @@ static double			preview_fps = 30.0;
 static double			v4l_device_retry = 0;
 static int			v4l_index = -2;
 static bool			v4l_open_shut_up = 0;
+static bool         v4l_vbi_via_sysfs = true;
 
 #define CROP_DEFAULT		-9999
 
@@ -765,6 +767,7 @@ static void help() {
 	fprintf(stderr,"    -input-standard <x>                    Video standard to select\n");
 	fprintf(stderr,"    -vcr-hack <x>                          Crop x lines from bottom\n");
 	fprintf(stderr,"    -vbi-first <x>                         Open VBI first, then init video (1=yes 0=no -1=auto)\n");
+    fprintf(stderr,"    -no-vbi-sysfs                          Don't use sysfs to find vbi device\n");
 }
 
 static int parse_argv(int argc,char **argv) {
@@ -781,6 +784,9 @@ static int parse_argv(int argc,char **argv) {
 				help();
 				return 1;
 			}
+            else if (!strcmp(a,"no-vbi-sysfs")) {
+                v4l_vbi_via_sysfs = false;
+            }
 			else if (!strcmp(a,"vbi-first")) {
 				v4l_open_vbi_first = atoi(argv[i++]);
 			}
@@ -888,11 +894,44 @@ static int parse_argv(int argc,char **argv) {
 
 void capture_vbi_open(void) {
 	if (capture_vbi) {
-		char tmp[64];
+		char tmp[256];
 
+        tmp[0] = 0;
 		fprintf(stderr,"Opening VBI device\n");
 
-		sprintf(tmp,"/dev/vbi%u",v4l_index);
+        /* wait! given the v4l index we may be able to use the sysfs pseudo-filesystem
+         * to locate for certain which vbi device is associated with it, instead of guessing.
+         *
+         * while most capture drivers allocate videoN and vbiN with matching N, it turns out
+         * the USB versions of Happauge's WinTV capture cards don't. On my laptop, it can
+         * easily end up where my webcam is video0 and the Happauge WinTV is video1 and vbi0. */
+        if (v4l_vbi_via_sysfs) {
+            struct dirent *d;
+            char path[256];
+            struct stat st;
+            DIR *dir;
+
+            sprintf(path,"/sys/class/video4linux/video%u/device/video4linux",v4l_index);
+
+            if ((dir=opendir(path)) != NULL) {
+                while ((d=readdir(dir)) != NULL) {
+                    if (fstatat(dirfd(dir),d->d_name,&st,0)) /* if we can't stat it, we can't use it */
+                        continue;
+
+                    /* we're looking for a directory named vbiX where X is an integer */
+                    if (!strncmp(d->d_name,"vbi",3) && isdigit(d->d_name[3])) {
+                        fprintf(stderr,"Found VBI device using sysfs. video%u -> %s\n",v4l_index,d->d_name);
+                        sprintf(tmp,"/dev/%s",d->d_name);
+                        break;
+                    }
+                }
+                closedir(dir);
+            }
+        }
+
+        if (tmp[0] == 0)
+    		sprintf(tmp,"/dev/vbi%u",v4l_index);
+
 		vbi_fd = open(tmp,O_RDWR);
 		if (vbi_fd >= 0) {
 			fprintf(stderr,"VBI device %s open\n",tmp);
