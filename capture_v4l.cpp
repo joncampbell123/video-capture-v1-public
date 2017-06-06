@@ -102,6 +102,9 @@ static int			v4l_index = -2;
 static bool			v4l_open_shut_up = 0;
 static bool         v4l_vbi_via_sysfs = true;
 
+static unsigned long long v4l_last_frame = 0,v4l_last_vbi = 0;
+static unsigned long long v4l_last_frame_delta = 0,v4l_last_vbi_delta = 0;
+
 #define CROP_DEFAULT		-9999
 
 static int			v4l_codec_yshr = 1;
@@ -269,6 +272,11 @@ static void open_avi_file() {
 		return;
 	if ((AVI = avi_writer_create()) == NULL)
 		return;
+
+    v4l_last_frame = 0;
+    v4l_last_vbi = 0;
+    v4l_last_frame_delta = 0;
+    v4l_last_vbi_delta = 0;
 
 	avcodec_register_all();
 	if (fmp4_codec == NULL) {
@@ -2273,6 +2281,9 @@ int main(int argc,char **argv) {
 							}
 						}
 
+                        v4l_last_frame_delta = avi_frame_counter - v4l_last_frame;
+                        v4l_last_frame = avi_frame_counter;
+
 						/* encode to MPEG-4 and store */
 						memset(&pkt,0,sizeof(pkt));
 						pkt.data = fmp4_temp;
@@ -2376,6 +2387,9 @@ int main(int argc,char **argv) {
 								}
 							}
 						}
+
+                        v4l_last_vbi_delta = avi_vbi_frame_counter - v4l_last_vbi;
+                        v4l_last_vbi = avi_vbi_frame_counter;
 
 						/* encode to MPEG-4 and store */
 						memset(&pkt,0,sizeof(pkt));
@@ -2486,7 +2500,10 @@ int main(int argc,char **argv) {
 							}
 
 							// add/remove padding to keep sync
-							fprintf(stderr,"AVI A/V err %.6f samp=%llu should=%llu\n",avi_audio_err,(unsigned long long)avi_audio_samples,(unsigned long long)samp_should);
+							fprintf(stderr,"AVI A/V err %.6f samp=%llu should=%llu vidlast=%llu+%llu vbilast=%llu+%llu\n",
+                                avi_audio_err,(unsigned long long)avi_audio_samples,(unsigned long long)samp_should,
+                                (unsigned long long)v4l_last_frame,(unsigned long long)v4l_last_frame_delta,
+                                (unsigned long long)v4l_last_vbi,  (unsigned long long)v4l_last_vbi_delta);
 							if (avi_audio_err >= ((double)audio_rate * 0.02)) {
 								unsigned int pad = (unsigned int)(avi_audio_err);
 								unsigned int pi;
