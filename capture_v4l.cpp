@@ -1101,29 +1101,6 @@ int open_v4l() {
 			goto fail;
 		}
 
-		/* saa7134 hack:
-		 *
-		 * the driver resets the crop rectangle when it re-applies the TV standard.
-		 * That is understandable, however it does this also when changing the input,
-		 * and it does it on opening the vbi or video device.
-		 *
-		 * The problem is that, if we open and set up the video device, THEN set up
-		 * the vbi capture, the VBI capture will trigger the TV standard setup which
-		 * will then reset our crop rectangle and then it's almost as if we never
-		 * changing it from the default.
-		 *
-		 * So, if we see the saa7134 driver here, we open the VBI device NOW to avoid
-		 * that problem. */
-		if (v4l_open_vbi_first > 0)
-			capture_vbi_open();
-		else if (v4l_open_vbi_first < 0) {
-			/* auto setting */
-			if (!strcmp((char*)v4l_caps.driver,"saa7134")) {
-				fprintf(stderr,"saa7134 driver detected, opening VBI device NOW to avoid crop rectangle bugs\n");
-				capture_vbi_open();
-			}
-		}
-
 		if (!input_device.empty()) {
 			struct v4l2_input v4l2_input;
 			unsigned int index;
@@ -1180,6 +1157,31 @@ int open_v4l() {
 			}
 			else {
 				fprintf(stderr,"Standard '%s' not found\n",input_standard.c_str());
+			}
+		}
+
+		/* saa7134 hack:
+		 *
+		 * the driver resets the crop rectangle when it re-applies the TV standard.
+		 * That is understandable, however it does this also when changing the input,
+		 * and it does it on opening the vbi or video device.
+		 *
+		 * The problem is that, if we open and set up the video device, THEN set up
+		 * the vbi capture, the VBI capture will trigger the TV standard setup which
+		 * will then reset our crop rectangle and then it's almost as if we never
+		 * changing it from the default.
+		 *
+		 * So, if we see the saa7134 driver here, we open the VBI device NOW to avoid
+		 * that problem. */
+		/* NTS: Set the video standard FIRST (above) then open VBI.
+		 *      Video standard affects what scanlines and how many are captured */
+		if (v4l_open_vbi_first > 0)
+			capture_vbi_open();
+		else if (v4l_open_vbi_first < 0) {
+			/* auto setting */
+			if (!strcmp((char*)v4l_caps.driver,"saa7134")) {
+				fprintf(stderr,"saa7134 driver detected, opening VBI device NOW to avoid crop rectangle bugs\n");
+				capture_vbi_open();
 			}
 		}
 
