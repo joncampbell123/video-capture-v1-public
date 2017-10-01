@@ -1624,21 +1624,41 @@ int open_v4l() {
 			fprintf(stderr,"Failed to set S16LE, %s\n",snd_strerror(err));
 			goto fail;
 		}
+
+        snd_pcm_uframes_t uft;
 		unsigned int rate = 48000;
 		int dir = 0;
-		if ((err = snd_pcm_hw_params_set_rate_near(alsa_pcm, alsa_hw_params, &rate, &dir)) < 0) {
+
+        if ((err = snd_pcm_hw_params_set_rate_near(alsa_pcm, alsa_hw_params, &rate, &dir)) < 0) {
 			fprintf(stderr,"Failed to set sample rate, %s\n",snd_strerror(err));
 			goto fail;
 		}
-		fprintf(stderr,"ALSA chose %uHz (dir=%d)\n",rate,dir);
+
+        fprintf(stderr,"ALSA chose %uHz (dir=%d)\n",rate,dir);
 		if ((err = snd_pcm_hw_params_set_channels(alsa_pcm, alsa_hw_params, 2)) < 0) {
 			fprintf(stderr,"Failed to set channels, %s\n",snd_strerror(err));
 			goto fail;
 		}
+
+        uft = rate / 120;
+        snd_pcm_hw_params_set_period_size_near(alsa_pcm, alsa_hw_params, &uft, &dir);
+
+        fprintf(stderr,"ALSA period: %lu frames\n",(unsigned long)uft);
+
+        uft = rate / 15;
+        snd_pcm_hw_params_set_buffer_size_min(alsa_pcm, alsa_hw_params, &uft);
+
+        uft = rate / 4;
+        snd_pcm_hw_params_set_buffer_size_max(alsa_pcm, alsa_hw_params, &uft);
+
 		if ((err = snd_pcm_hw_params(alsa_pcm, alsa_hw_params)) < 0) {
 			fprintf(stderr,"Failed to apply params, %s\n",snd_strerror(err));
 			goto fail;
 		}
+
+        uft = 0;
+        snd_pcm_hw_params_get_buffer_size(alsa_hw_params, &uft);
+        fprintf(stderr,"ALSA buffer size: %lu frames\n",(unsigned long)uft);
 
 		snd_pcm_hw_params_free(alsa_hw_params);
 		alsa_hw_params = NULL;
