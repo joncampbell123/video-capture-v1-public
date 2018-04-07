@@ -235,6 +235,7 @@ public:
 	bool				crop_bounds;
 	bool				crop_defrect;
 	int				crop_left,crop_top,crop_width,crop_height;
+    double              capture_fps;
 	std::string			input_codec;
 	std::string			vcrhack;
 
@@ -282,6 +283,7 @@ GtkWidget*			input_dialog = NULL;
 GtkWidget*			input_dialog_device = NULL;
 GtkWidget*			input_dialog_standard = NULL;
 GtkWidget*			input_dialog_capres = NULL;
+GtkWidget*			input_dialog_capfps = NULL;
 GtkWidget*			input_dialog_codec = NULL;
 GtkWidget*			input_dialog_vcrhack = NULL;
 GtkWidget*			input_dialog_vbi_enable = NULL;
@@ -835,6 +837,8 @@ void load_config_section_input(const char *name,const char *value) {
 		iobj->input_device = value;
 	else if (!strcmp(name,"input standard"))
 		iobj->input_standard = value;
+	else if (!strcmp(name,"capture fps"))
+		iobj->capture_fps = atof(value);
 	else if (!strcmp(name,"capture width"))
 		iobj->capture_width = atoi(value);
 	else if (!strcmp(name,"capture height"))
@@ -1026,6 +1030,7 @@ void save_configuration() {
 			fprintf(fp,"audio device = %s\n",iobj->audio_device.c_str());
 			fprintf(fp,"input device = %s\n",iobj->input_device.c_str());
 			fprintf(fp,"input standard = %s\n",iobj->input_standard.c_str());
+			fprintf(fp,"capture fps = %.3f\n",iobj->capture_fps);
 			fprintf(fp,"capture width = %d\n",iobj->capture_width);
 			fprintf(fp,"capture height = %d\n",iobj->capture_height);
 			fprintf(fp,"vcr hack = %s\n",iobj->vcrhack.c_str());
@@ -3185,6 +3190,13 @@ bool InputManager::start_process() {
 		argv[argc++] = input_codec.c_str();
 	}
 
+	char param_fps[64];
+	if (capture_fps > 0) {
+		sprintf(param_fps,"%.3f",capture_fps);
+		argv[argc++] = "--fps";
+		argv[argc++] = param_fps;
+	}
+
 	char param_w[64];
 	if (capture_width > 0) {
 		sprintf(param_w,"%d",capture_width);
@@ -3476,6 +3488,7 @@ InputManager::InputManager(int input_index) {
 	user_ar_n = user_ar_d = -1;
 	capture_width = 0;
 	capture_height = 0;
+    capture_fps = 0;
 	crop_defrect = false;
 	crop_bounds = false;
 	crop_left = crop_top = crop_width = crop_height = CROP_DEFAULT;
@@ -3945,6 +3958,52 @@ static gint v4l_capres_dropdown_populate_and_select(GtkWidget *listbox,GtkListSt
 	return active;
 }
 
+static gint v4l_capfps_dropdown_populate_and_select(GtkWidget *listbox,GtkListStore *list) {
+	static const char *modelist[] = {
+		"1",
+		"2",
+		"5",
+		"10",
+		"15",
+		"20",
+		"24",
+		"25",
+		"29.97",
+		"30",
+		"40",
+		"50",
+		"59.94",
+		"60",
+		"70",
+		"75",
+		"80",
+		"90",
+		"100",
+		"119.88",
+		"120",
+		NULL
+	};
+	void **hints,**n;
+	GtkTreeIter iter;
+	gint active = -1;
+	int count = 0;
+	int index;
+
+	gtk_list_store_append(list, &iter);
+	gtk_list_store_set(list, &iter, /*column*/0, "", -1);
+	if (active < 0 && (CurrentInputObj()->capture_fps <= 0)) active = 0;
+	count++;
+
+	for (index=0;modelist[index] != NULL;index++) {
+		gtk_list_store_append(list, &iter);
+		gtk_list_store_set(list, &iter, /*column*/0, modelist[index], -1);
+		if (active < 0 && atof(modelist[index]) == CurrentInputObj()->capture_fps) active = count;
+		count++;
+	}
+
+	return active;
+}
+
 static gint v4l_standard_dropdown_populate_and_select(GtkWidget *listbox,GtkListStore *list) {
 	void **hints,**n;
 	GtkTreeIter iter;
@@ -4179,6 +4238,20 @@ static void update_input_dialog_from_vars() {
 
 	gtk_combo_box_set_active (GTK_COMBO_BOX(input_dialog_capres), active);
 
+	/* capture fps select */
+	model = gtk_combo_box_get_model (GTK_COMBO_BOX(input_dialog_capfps));
+	if (model != NULL) {
+		gtk_list_store_clear (GTK_LIST_STORE(model));
+		gtk_combo_box_set_model (GTK_COMBO_BOX(input_dialog_capfps), model);
+	}
+
+	model = GTK_TREE_MODEL(gtk_list_store_new (2, G_TYPE_STRING, G_TYPE_STRING));
+	assert(model != NULL);
+	active = v4l_capfps_dropdown_populate_and_select (input_dialog_capfps, GTK_LIST_STORE(model));
+	gtk_combo_box_set_model (GTK_COMBO_BOX(input_dialog_capfps), model);
+
+	gtk_combo_box_set_active (GTK_COMBO_BOX(input_dialog_capfps), active);
+
 	/* codec select */
 	model = gtk_combo_box_get_model (GTK_COMBO_BOX(input_dialog_codec));
 	if (model != NULL) {
@@ -4315,6 +4388,34 @@ static bool update_vars_from_input_dialog() {
 	}
 
 	if (old_capw != CurrentInputObj()->capture_width || old_caph != CurrentInputObj()->capture_height)
+		do_reopen = true;
+
+    /* frame rate */
+	active = gtk_combo_box_get_active (GTK_COMBO_BOX(input_dialog_capfps));
+	model = gtk_combo_box_get_model (GTK_COMBO_BOX(input_dialog_capfps));
+
+    double old_capf = CurrentInputObj()->capture_fps;
+
+    CurrentInputObj()->capture_fps = -1;
+    if (model != NULL && active >= 0) {
+		GtkTreeIter iter;
+		char *str;
+		GValue v;
+
+		memset(&v,0,sizeof(v));
+		if (gtk_tree_model_iter_nth_child(model,&iter,NULL,active) == TRUE) {
+			gtk_tree_model_get_value(model,&iter,0,&v);
+			str = (char*)g_value_get_string(&v);
+
+			if (isdigit(*str)) {
+				CurrentInputObj()->capture_fps = atof(str);
+			}
+		}
+
+		g_value_unset(&v);
+	}
+
+	if (old_capf != CurrentInputObj()->capture_fps)
 		do_reopen = true;
 
 	/* codec */
@@ -4613,6 +4714,22 @@ void create_input_dialog() {
 		cell = gtk_cell_renderer_text_new();
 		gtk_cell_layout_pack_start(GTK_CELL_LAYOUT(input_dialog_capres), cell, TRUE);
 		gtk_cell_layout_set_attributes(GTK_CELL_LAYOUT(input_dialog_capres), cell, "text", 0, NULL);
+	}
+
+	gtk_container_add (GTK_CONTAINER(vbox), hbox);
+
+	/* fps select */
+	hbox = gtk_hbox_new (FALSE, 0);
+
+	input_dialog_capfps = gtk_combo_box_new ();
+	gtk_container_add (GTK_CONTAINER(hbox), input_dialog_capfps);
+
+	{
+		GtkCellRenderer *cell;
+
+		cell = gtk_cell_renderer_text_new();
+		gtk_cell_layout_pack_start(GTK_CELL_LAYOUT(input_dialog_capfps), cell, TRUE);
+		gtk_cell_layout_set_attributes(GTK_CELL_LAYOUT(input_dialog_capfps), cell, "text", 0, NULL);
 	}
 
 	gtk_container_add (GTK_CONTAINER(vbox), hbox);

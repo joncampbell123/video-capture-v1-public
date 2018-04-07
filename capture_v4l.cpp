@@ -1483,7 +1483,7 @@ int open_v4l() {
                 v4l_framerate_n = 60000;
                 v4l_framerate_d = 1001;
             }
-            else if (want_fps >= 119.9 && want_fps < 119.99) {
+            else if (want_fps >= 119.8 && want_fps < 119.95) {
                 v4l_framerate_n = 120000;
                 v4l_framerate_d = 1001;
             }
