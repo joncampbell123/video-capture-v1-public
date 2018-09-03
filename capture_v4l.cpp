@@ -2565,7 +2565,7 @@ int main(int argc,char **argv) {
 							// add/remove padding to keep sync
 							// keep noise down by printing only if delta is not 1
 							if (v4l_last_frame_delta != 1 || v4l_last_vbi_delta != 1) {
-							fprintf(stderr,"AVI A/V err %.6f samp=%llu should=%llu vidlast=%llu+%llu vbilast=%llu+%llu\n",
+							fprintf(stderr,"AVI A/V err at %.3f: %.6f samp=%llu should=%llu vidlast=%llu+%llu vbilast=%llu+%llu\n",tt,
                                 avi_audio_err,(unsigned long long)avi_audio_samples,(unsigned long long)samp_should,
                                 (unsigned long long)v4l_last_frame,(unsigned long long)v4l_last_frame_delta,
                                 (unsigned long long)v4l_last_vbi,  (unsigned long long)v4l_last_vbi_delta);
@@ -2575,11 +2575,11 @@ int main(int argc,char **argv) {
 								unsigned int pad = (unsigned int)(avi_audio_err);
 								unsigned int pi;
 
-								fprintf(stderr,"AVI audio stream is behind, adding padding %u samples\n",pad);
+								fprintf(stderr,"AVI audio stream is behind at %.3f, adding padding %u samples\n",tt,pad);
 
 								if (AVI_logfile != NULL)
-									fprintf(AVI_logfile,"AVI audio stream is behind, adding padding %u samples at %llu samples\n",
-										pad,(unsigned long long)avi_audio_samples);
+									fprintf(AVI_logfile,"AVI audio stream is behind at %.3f, adding padding %u samples at %llu samples\n",
+										tt,pad,(unsigned long long)avi_audio_samples);
 
 								/* write a distinctive pattern so future software can distinguish our padding */
 								if ((pad*audio_channels*sizeof(int16_t)) > sizeof(fmp4_yuv))
@@ -2597,11 +2597,11 @@ int main(int argc,char **argv) {
 								double pad = (-avi_audio_err) / audio_rate;
 								if (pad > 0.1) pad = 0.1;
 
-								fprintf(stderr,"AVI audio stream is ahead, slowing video down %.6f seconds\n",pad);
+								fprintf(stderr,"AVI audio stream is ahead at %.3f, slowing video down %.6f seconds\n",tt,pad);
 
 								if (AVI_logfile != NULL)
-									fprintf(AVI_logfile,"AVI audio stream is ahead, slowing video down %.6f seconds at %llu samples\n",
-										pad,(unsigned long long)avi_audio_samples);
+									fprintf(AVI_logfile,"AVI audio stream is ahead at %.3f, slowing video down %.6f seconds at %llu samples\n",
+										tt,pad,(unsigned long long)avi_audio_samples);
 
 								avi_file_start_time -= pad;
 								avi_audio_err += pad;
@@ -2614,10 +2614,16 @@ int main(int argc,char **argv) {
 					}
 				}
 				else if (done < 0) {
+                    double tt;
+
+                    // time to sample
+                    tt = NOW - avi_file_start_time;
+                    if (tt < 0) tt = 0;
+
 					if (done == -EPIPE) {
-						fprintf(stderr,"ALSA buffer underrun!\n");
+						fprintf(stderr,"ALSA buffer underrun at %.3f!\n",tt);
 						if (AVI_logfile != NULL)
-							fprintf(AVI_logfile,"ALSA buffer underrun!\n");
+							fprintf(AVI_logfile,"ALSA buffer underrun at %.3f!\n",tt);
 
 						if ((err = snd_pcm_prepare(alsa_pcm)) < 0) {
 							fprintf(stderr,"Failed to prepare ALSA, %s\n",snd_strerror(err));
