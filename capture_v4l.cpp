@@ -2570,7 +2570,7 @@ int main(int argc,char **argv) {
 
 							// add/remove padding to keep sync
 							// keep noise down by printing only if delta is not 1
-							if (v4l_last_frame_delta != 1 || v4l_last_vbi_delta != 1) {
+							if (v4l_last_frame_delta != 1 || (capture_vbi && v4l_last_vbi_delta != 1)) {
 							fprintf(stderr,"AVI A/V err at %.3f: %.6f samp=%llu should=%llu vidlast=%llu+%llu vbilast=%llu+%llu\n",tt,
                                 avi_audio_err,(unsigned long long)avi_audio_samples,(unsigned long long)samp_should,
                                 (unsigned long long)v4l_last_frame,(unsigned long long)v4l_last_frame_delta,
