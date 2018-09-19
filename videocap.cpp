@@ -234,6 +234,7 @@ public:
 	int				capture_height;
 	bool				crop_bounds;
 	bool				crop_defrect;
+    bool                async_io;
 	int				crop_left,crop_top,crop_width,crop_height;
     double              capture_fps;
 	std::string			input_codec;
@@ -289,6 +290,7 @@ GtkWidget*			input_dialog_vcrhack = NULL;
 GtkWidget*			input_dialog_vbi_enable = NULL;
 GtkWidget*			input_dialog_def_crop = NULL;
 GtkWidget*			input_dialog_bounds_crop = NULL;
+GtkWidget*          input_dialog_async_io = NULL;
 GtkWidget*			audio_dialog = NULL;
 GtkWidget*			audio_dialog_device = NULL;
 GtkWidget*			audio_dialog_enable = NULL;
@@ -847,6 +849,8 @@ void load_config_section_input(const char *name,const char *value) {
 		iobj->input_codec = value;
 	else if (!strcmp(name,"vcr hack"))
 		iobj->vcrhack = value;
+	else if (!strcmp(name,"async io"))
+		iobj->async_io = atoi(value) > 0;
 	else if (!strcmp(name,"crop")) {
 		iobj->crop_defrect = iobj->crop_bounds = false;
 		iobj->crop_left = iobj->crop_top = iobj->crop_width = iobj->crop_height = CROP_DEFAULT;
@@ -1034,6 +1038,7 @@ void save_configuration() {
 			fprintf(fp,"capture width = %d\n",iobj->capture_width);
 			fprintf(fp,"capture height = %d\n",iobj->capture_height);
 			fprintf(fp,"vcr hack = %s\n",iobj->vcrhack.c_str());
+			fprintf(fp,"async io = %d\n",iobj->async_io);
 			fprintf(fp,"codec = %s\n",iobj->input_codec.c_str());
 
 			fprintf(fp,"crop = ");
@@ -3211,6 +3216,9 @@ bool InputManager::start_process() {
 		argv[argc++] = param_h;
 	}
 
+	if (async_io)
+		argv[argc++] = "--async-io";
+
 	char crop_l[64],crop_t[64],crop_w[64],crop_h[64];
 	if (crop_bounds)
 		argv[argc++] = "--cropbound";
@@ -3491,6 +3499,7 @@ InputManager::InputManager(int input_index) {
     capture_fps = 0;
 	crop_defrect = false;
 	crop_bounds = false;
+    async_io = true;
 	crop_left = crop_top = crop_width = crop_height = CROP_DEFAULT;
 	enable_audio = false;
 	enable_vbi = false;
@@ -4195,6 +4204,7 @@ static void update_input_dialog_from_vars() {
 	gtk_toggle_button_set_active (GTK_TOGGLE_BUTTON(input_dialog_vbi_enable), CurrentInputObj()->enable_vbi);
 	gtk_toggle_button_set_active (GTK_TOGGLE_BUTTON(input_dialog_def_crop), CurrentInputObj()->crop_defrect);
 	gtk_toggle_button_set_active (GTK_TOGGLE_BUTTON(input_dialog_bounds_crop), CurrentInputObj()->crop_bounds);
+	gtk_toggle_button_set_active (GTK_TOGGLE_BUTTON(input_dialog_async_io), CurrentInputObj()->async_io);
 
 	/* input select */
 	model = gtk_combo_box_get_model (GTK_COMBO_BOX(input_dialog_device));
@@ -4305,6 +4315,10 @@ static bool update_vars_from_input_dialog() {
 	tmp = gtk_toggle_button_get_active (GTK_TOGGLE_BUTTON(input_dialog_bounds_crop)) > 0;
 	if (tmp != CurrentInputObj()->crop_bounds) do_reopen = true;
 	CurrentInputObj()->crop_bounds = tmp;
+
+	tmp = gtk_toggle_button_get_active (GTK_TOGGLE_BUTTON(input_dialog_async_io)) > 0;
+	if (tmp != CurrentInputObj()->async_io) do_reopen = true;
+	CurrentInputObj()->async_io = tmp;
 
 	/* input */
 	active = gtk_combo_box_get_active (GTK_COMBO_BOX(input_dialog_device));
@@ -4787,6 +4801,14 @@ void create_input_dialog() {
 
 	input_dialog_bounds_crop = gtk_check_button_new_with_label ("Use boundary crop rectangle");
 	gtk_container_add (GTK_CONTAINER(hbox), input_dialog_bounds_crop);
+
+	gtk_container_add (GTK_CONTAINER(vbox), hbox);
+
+
+	hbox = gtk_hbox_new (FALSE, 0);
+
+	input_dialog_async_io = gtk_check_button_new_with_label ("Asynchronous disk I/O (recommended)");
+	gtk_container_add (GTK_CONTAINER(hbox), input_dialog_async_io);
 
 	gtk_container_add (GTK_CONTAINER(vbox), hbox);
 

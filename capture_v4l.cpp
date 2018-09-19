@@ -68,6 +68,8 @@ static struct v4l2_format	v4l_vbi_capfmt;
 static unsigned char*		vbi_buffer = NULL;		/* [vbi_width * vbi_height] */
 static unsigned int		vbi_read_field = 0;
 
+static bool             async_io = false;
+
 static double			avi_audio_err = 0;
 static snd_pcm_hw_params_t*	alsa_hw_params = NULL;
 static snd_pcm_t*		alsa_pcm = NULL;
@@ -761,6 +763,7 @@ static void help() {
 	fprintf(stderr,"    -socket <n>                            Socket location\n");
 	fprintf(stderr,"    -width <n>                             Capture width\n");
 	fprintf(stderr,"    -height <n>                            Capture height\n");
+    fprintf(stderr,"    -async-io                              Use asynchronous disk I/O (recommended)\n");
 	fprintf(stderr,"    -cropbound                             Set crop rect to bounds rect\n");
 	fprintf(stderr,"    -cropdef                               Set crop rect to default rect\n");
 	fprintf(stderr,"    -cx <n>                                Left crop rect coordinate\n");
@@ -812,6 +815,9 @@ static int parse_argv(int argc,char **argv) {
 			}
 			else if (!strcmp(a,"codec")) {
 				want_codec_sel = argv[i++];
+			}
+            else if (!strcmp(a,"async-io")) {
+                async_io = true;
 			}
 			else if (!strcmp(a,"cropbound")) {
 				v4l_crop_bounds = true;
