@@ -2553,11 +2553,14 @@ int main(int argc,char **argv) {
 							if (tt < 0) tt = 0;
 							samp_should = (unsigned long long)(tt * audio_rate);
 
+#if 0 // NTS: Capture delay according to ALSA seems to be buffer size + available.
+      //      This is causing visible A/V sync error in my captures. Stop doing this.
 							// then consider what ALSA says is the delay
 							if (samp_should >= (unsigned long long)delay)
 								samp_should -= (unsigned long long)delay;
 							else
 								samp_should = 0ULL;
+#endif
 
 							// smooth out the difference. if it is consistently off we'll adjust it.
 							if (fabs((double)samp_should - (double)avi_audio_samples) >= ((double)audio_rate * 0.5)) {
