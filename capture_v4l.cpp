@@ -60,7 +60,7 @@ enum AVIPacketStream {
 
 class AVIPacket {
 public:
-    AVIPacket() : avi_flags(0), data(NULL), data_length(0), stream(AVI_STREAM_NONE) {
+    AVIPacket() : avi_flags(0), data(NULL), data_length(0), stream(AVI_STREAM_NONE), target_chunk(0) {
     }
     ~AVIPacket() {
         free_data();
@@ -92,6 +92,7 @@ public:
     unsigned char*          data;
     size_t                  data_length;
     enum AVIPacketStream    stream;
+    unsigned long long      target_chunk;
 };
 
 /* WARNING: In async mode, this queue is used by main thread and disk I/O thread.
@@ -322,26 +323,36 @@ void *async_avi_thread_proc(void *arg) {
         if (async_avi_queue_trylock()) {
             if (!async_avi_queue.empty()) {
                 // something in the queue. take it and unlock immediately.
+                int patience = 1024;
                 AVIPacket *pkt = async_avi_queue.front();
                 async_avi_queue.pop_front();
                 async_avi_queue_unlock();
 
-                fprintf(stderr,"PACKET: data=%p len=%zu flags=0x%x stream=%u\n",
-                    pkt->data,pkt->data_length,pkt->avi_flags,pkt->stream);
+                fprintf(stderr,"PACKET: data=%p len=%zu flags=0x%x stream=%u target_chunk=%llu\n",
+                    pkt->data,pkt->data_length,pkt->avi_flags,pkt->stream,pkt->target_chunk);
 
                 assert(AVI != NULL);
 
                 switch (pkt->stream) {
                     case AVI_STREAM_AUDIO:
                         assert(AVI_audio != NULL);
+                        assert(pkt->target_chunk == 0);
                         avi_writer_stream_write(AVI, AVI_audio, pkt->data, pkt->data_length, pkt->avi_flags);
                         break;
                     case AVI_STREAM_VIDEO:
                         assert(AVI_video != NULL);
+
+                        while (AVI_video->sample_write_chunk < pkt->target_chunk && patience-- > 0)
+                            avi_writer_stream_write(AVI,AVI_video,NULL,0,0);
+
                         avi_writer_stream_write(AVI, AVI_video, pkt->data, pkt->data_length, pkt->avi_flags);
                         break;
                     case AVI_STREAM_VBI:
                         assert(AVI_vbi_video != NULL);
+
+                        while (AVI_vbi_video->sample_write_chunk < pkt->target_chunk && patience-- > 0)
+                            avi_writer_stream_write(AVI,AVI_vbi_video,NULL,0,0);
+
                         avi_writer_stream_write(AVI, AVI_vbi_video, pkt->data, pkt->data_length, pkt->avi_flags);
                         break;
                     default:
@@ -2565,16 +2576,9 @@ int main(int argc,char **argv) {
 							if (rd > 0) {
 								int patience = 1000;
 
-								while (AVI_video->sample_write_chunk < pkt.dts && patience-- > 0) {
-                                    if (async_io) {
-                                        AVIPacket *p = new AVIPacket();
-                                        p->stream = AVI_STREAM_VIDEO;
-                                        p->set_flags(0);
-                                        async_avi_queue_add(&p);
-                                    }
-                                    else {
-    									avi_writer_stream_write(AVI,AVI_video,NULL,0,0);
-                                    }
+                                if (!async_io) {
+                                    while (AVI_video->sample_write_chunk < pkt.dts && patience-- > 0)
+                                        avi_writer_stream_write(AVI,AVI_video,NULL,0,0);
                                 }
 
                                 if (async_io) {
@@ -2582,6 +2586,7 @@ int main(int argc,char **argv) {
                                     p->stream = AVI_STREAM_VIDEO;
                                     p->set_data(fmp4_temp,rd);
                                     p->set_flags((pkt.flags&AV_PKT_FLAG_KEY) ? riff_idx1_AVIOLDINDEX_flags_KEYFRAME : 0);
+                                    p->target_chunk = pkt.dts;
                                     async_avi_queue_add(&p);
                                 }
                                 else {
@@ -2689,16 +2694,9 @@ int main(int argc,char **argv) {
 							if (rd > 0) {
 								int patience = 1000;
 
-								while (AVI_vbi_video->sample_write_chunk < pkt.dts && patience-- > 0) {
-                                    if (async_io) {
-                                        AVIPacket *p = new AVIPacket();
-                                        p->stream = AVI_STREAM_VBI;
-                                        p->set_flags(0);
-                                        async_avi_queue_add(&p);
-                                    }
-                                    else {
+                                if (!async_io) {
+                                    while (AVI_vbi_video->sample_write_chunk < pkt.dts && patience-- > 0)
                                         avi_writer_stream_write(AVI,AVI_vbi_video,NULL,0,0);
-                                    }
                                 }
 
                                 if (async_io) {
@@ -2706,6 +2704,7 @@ int main(int argc,char **argv) {
                                     p->stream = AVI_STREAM_VBI;
                                     p->set_data(fmp4_temp,rd);
                                     p->set_flags((pkt.flags&AV_PKT_FLAG_KEY) ? riff_idx1_AVIOLDINDEX_flags_KEYFRAME : 0);
+                                    p->target_chunk = pkt.dts;
                                     async_avi_queue_add(&p);
                                 }
                                 else {
