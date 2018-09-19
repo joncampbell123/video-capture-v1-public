@@ -164,6 +164,9 @@ void flush_async_queue(void) {
         abort();
     }
 
+    if (!async_avi_queue.empty())
+        fprintf(stderr,"Async I/O queue: Dropping %zu items\n",async_avi_queue.size());
+
     while (!async_avi_queue.empty()) {
         AVIPacket *pkt = async_avi_queue.front();
         async_avi_queue.pop_front();
