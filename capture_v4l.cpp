@@ -328,9 +328,10 @@ void *async_avi_thread_proc(void *arg) {
                 async_avi_queue.pop_front();
                 async_avi_queue_unlock();
 
+#if 0
                 fprintf(stderr,"PACKET: data=%p len=%zu flags=0x%x stream=%u target_chunk=%llu\n",
                     pkt->data,pkt->data_length,pkt->avi_flags,pkt->stream,pkt->target_chunk);
-
+#endif
                 assert(AVI != NULL);
 
                 switch (pkt->stream) {
