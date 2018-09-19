@@ -51,6 +51,113 @@ using namespace std;
 #include <list>
 #include <string>
 
+enum AVIPacketStream {
+    AVI_STREAM_NONE=0,
+    AVI_STREAM_AUDIO,
+    AVI_STREAM_VIDEO,
+    AVI_STREAM_VBI
+};
+
+class AVIPacket {
+public:
+    AVIPacket() : avi_flags(0), data(NULL), data_length(0), stream(AVI_STREAM_NONE) {
+    }
+    ~AVIPacket() {
+        free_data();
+    }
+public:
+    void set_flags(const uint32_t flags) {
+        avi_flags = flags;
+    }
+    bool set_data(const unsigned char *src,size_t len) {
+        if (data != NULL) free_data();
+        if (len == 0) return true;
+
+        data = new unsigned char[len];
+        if (data == NULL) return false;
+        data_length = len;
+        memcpy(data,src,len);
+
+        return true;
+    }
+    void free_data(void) {
+        if (data != NULL) {
+            delete[] data;
+            data = NULL;
+        }
+        data_length = 0;
+    }
+public:
+    uint32_t                avi_flags;
+    unsigned char*          data;
+    size_t                  data_length;
+    enum AVIPacketStream    stream;
+};
+
+/* WARNING: In async mode, this queue is used by main thread and disk I/O thread.
+ *          Both must mediate access using a mutex!
+ *
+ *          Push data to the end, pull from the beginning */
+std::list<AVIPacket*>       async_avi_queue;
+pthread_mutex_t             async_avi_queue_mutex = PTHREAD_MUTEX_INITIALIZER;
+pthread_t                   async_avi_thread;
+volatile bool               async_avi_thread_running = false;
+volatile bool               async_avi_thread_die = false;
+
+void *async_avi_thread_proc(void *arg) {
+    while (!async_avi_thread_die) {
+        // TODO
+        usleep(10000);
+    }
+
+    async_avi_thread_running = false;
+    async_avi_thread_die = false;
+    return NULL;
+}
+
+void async_avi_thread_start(void) {
+    if (!async_avi_thread_running) {
+        assert(async_avi_thread_die == false);
+
+        async_avi_thread_running = true;
+        if (pthread_create(&async_avi_thread,NULL,async_avi_thread_proc,NULL)) {
+            fprintf(stderr,"Async AVI thread start: failed\n");
+            abort();
+        }
+
+        fprintf(stderr,"Asynchronous I/O thread started\n");
+    }
+}
+
+void async_avi_thread_stop(void) {
+    if (async_avi_thread_running) {
+        async_avi_thread_die = true;
+        fprintf(stderr,"Stopping async I/O thread\n");
+        if (pthread_join(async_avi_thread,NULL) != 0) {
+            fprintf(stderr,"pthread_join() failed stopping async AVI thread\n");
+            abort();
+        }
+
+        /* thread should clear both on exit */
+        assert(async_avi_thread_running == false);
+        assert(async_avi_thread_die == false);
+    }
+}
+
+/* WARNING: Do not call unless disk I/O thread is stopped */
+void flush_async_queue(void) {
+    if (async_avi_thread_running) {
+        fprintf(stderr,"BUG: flush_async_queue() while AVI async I/O thread is running\n");
+        abort();
+    }
+
+    while (!async_avi_queue.empty()) {
+        AVIPacket *pkt = async_avi_queue.front();
+        async_avi_queue.pop_front();
+        delete pkt;
+    }
+}
+
 /* FIXME: Red Hat 4.1.2 Video4Linux doesn't have V4L2_FIELD_INTERLACED_BT? */
 #ifndef V4L2_FIELD_INTERLACED_BT
 #define V4L2_FIELD_INTERLACED_BT 0xDEADBEEF /* define it as a constant that doesn't exist */
@@ -207,6 +314,9 @@ static void *close_avi_file_thread(void *x) {
 static list<pthread_t> close_threads;
 
 static void close_avi_file() {
+    async_avi_thread_stop();
+    flush_async_queue();
+
 	if (AVI_logfile != NULL) {
 		{
 			time_t n = time(NULL);
@@ -746,6 +856,8 @@ static void open_avi_file() {
 		close_avi_file();
 		return;
 	}
+
+    if (async_io) async_avi_thread_start();
 }
 
 static void sigma(int __attribute__((unused)) x) {
