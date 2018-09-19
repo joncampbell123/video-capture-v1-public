@@ -125,38 +125,7 @@ bool async_avi_queue_trylock(void) {
     return true;
 }
 
-void *async_avi_thread_proc(void *arg) {
-    while (!async_avi_thread_die) {
-        if (async_avi_queue_trylock()) {
-            if (!async_avi_queue.empty()) {
-                // something in the queue. take it and unlock immediately.
-                AVIPacket *pkt = async_avi_queue.front();
-                async_avi_queue.pop_front();
-                async_avi_queue_unlock();
-
-                fprintf(stderr,"PACKET: data=%p len=%zu flags=0x%x stream=%u\n",
-                    pkt->data,pkt->data_length,pkt->avi_flags,pkt->stream);
-
-                // TODO: Do something
-
-                delete pkt;
-            }
-            else {
-                // nothing in the queue, unlock and sleep
-                async_avi_queue_unlock();
-                usleep(10000);
-            }
-        }
-        else {
-            // failed to lock, sleep and try again
-            usleep(1000);
-        }
-    }
-
-    async_avi_thread_running = false;
-    async_avi_thread_die = false;
-    return NULL;
-}
+void *async_avi_thread_proc(void *arg);
 
 void async_avi_thread_start(void) {
     if (!async_avi_thread_running) {
@@ -330,6 +299,57 @@ static int how_many_cpus() {
 	int number_of_cpus = sysconf(_SC_NPROCESSORS_ONLN);
 	if (number_of_cpus < 1) number_of_cpus = 1;
 	return number_of_cpus;
+}
+
+void *async_avi_thread_proc(void *arg) {
+    while (!async_avi_thread_die) {
+        if (async_avi_queue_trylock()) {
+            if (!async_avi_queue.empty()) {
+                // something in the queue. take it and unlock immediately.
+                AVIPacket *pkt = async_avi_queue.front();
+                async_avi_queue.pop_front();
+                async_avi_queue_unlock();
+
+                fprintf(stderr,"PACKET: data=%p len=%zu flags=0x%x stream=%u\n",
+                    pkt->data,pkt->data_length,pkt->avi_flags,pkt->stream);
+
+                assert(AVI != NULL);
+
+                switch (pkt->stream) {
+                    case AVI_STREAM_AUDIO:
+                        assert(AVI_audio != NULL);
+                        avi_writer_stream_write(AVI, AVI_audio, pkt->data, pkt->data_length, pkt->avi_flags);
+                        break;
+                    case AVI_STREAM_VIDEO:
+                        assert(AVI_video != NULL);
+                        avi_writer_stream_write(AVI, AVI_video, pkt->data, pkt->data_length, pkt->avi_flags);
+                        break;
+                    case AVI_STREAM_VBI:
+                        assert(AVI_vbi_video != NULL);
+                        avi_writer_stream_write(AVI, AVI_vbi_video, pkt->data, pkt->data_length, pkt->avi_flags);
+                        break;
+                    default:
+                        abort();
+                        break;
+                }
+
+                delete pkt;
+            }
+            else {
+                // nothing in the queue, unlock and sleep
+                async_avi_queue_unlock();
+                usleep(10000);
+            }
+        }
+        else {
+            // failed to lock, sleep and try again
+            usleep(1000);
+        }
+    }
+
+    async_avi_thread_running = false;
+    async_avi_thread_die = false;
+    return NULL;
 }
 
 static int sched_self_realtime() {
