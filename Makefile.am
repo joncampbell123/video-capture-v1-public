@@ -47,7 +47,7 @@ avicutter_LDFLAGS = -lm
 capture_v4l_SOURCES = capture_v4l.cpp now.c avi_writer.c avi_reader.c avi_rw_iobuf.c riff.c
 capture_v4l_CFLAGS = $(GTK_CFLAGS) -D_FILE_OFFSET_BITS=64
 capture_v4l_CXXFLAGS = $(GTK_CFLAGS) -D_FILE_OFFSET_BITS=64
-capture_v4l_LDFLAGS = $(GTK_LIBS) -lrt -lavcodec -lavutil -lasound
+capture_v4l_LDFLAGS = $(GTK_LIBS) -lrt -lavcodec -lavutil -lasound -pthread
 
 # main app
 videocap_SOURCES = videocap.cpp now.c avi_writer.c avi_reader.c avi_rw_iobuf.c riff.c

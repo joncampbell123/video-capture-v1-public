@@ -23,6 +23,8 @@
 #include <fcntl.h>
 #include <sched.h>
 
+#include <pthread.h> /* portable thread library -- we're multi-threaded now! */
+
 #include <alsa/asoundlib.h>	/* ALSA sound library */
 
 #include <linux/videodev2.h>	/* Linux Video4Linux 2 capture interface */
