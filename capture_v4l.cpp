@@ -916,12 +916,13 @@ static void open_avi_file() {
 				case V4L2_FIELD_INTERLACED_BT:	field_str = "interlaced-bt"; break;
 			};
 
-			sprintf(tmp,"w=%u h=%u stride=%u size=%u pixfmt='%s' field='%s'",
+			sprintf(tmp,"w=%u h=%u stride=%u size=%u pixfmt='%s' field='%s' async=%u",
 					(unsigned int)v4l_fmt.fmt.pix.width,
 					(unsigned int)v4l_fmt.fmt.pix.height,
 					(unsigned int)v4l_fmt.fmt.pix.bytesperline,
 					(unsigned int)v4l_fmt.fmt.pix.sizeimage,
-					px,field_str);
+					px,field_str,
+                    async_io?1:0);
 
 			riff_stack_begin_new_chunk_here(AVI->riff,&chunk);
 			riff_stack_set_chunk_data_type(&chunk,avi_fourcc_const('V','C','N','F')); /* video capture info */
