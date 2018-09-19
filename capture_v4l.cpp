@@ -301,6 +301,22 @@ static int how_many_cpus() {
 	return number_of_cpus;
 }
 
+bool async_avi_queue_add(AVIPacket **pkt) { // you give ownership of the pointer to the I/O thread.
+    assert(pkt != NULL);
+    assert(async_avi_thread_running);
+
+    if (*pkt != NULL) {
+        AVIPacket *p = *pkt;
+        *pkt = NULL;
+
+        async_avi_queue_lock();
+        async_avi_queue.push_back(p);
+        async_avi_queue_unlock();
+    }
+
+    return true;
+}
+
 void *async_avi_thread_proc(void *arg) {
     while (!async_avi_thread_die) {
         if (async_avi_queue_trylock()) {
