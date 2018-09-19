@@ -407,6 +407,8 @@ static void close_avi_file() {
     async_avi_thread_stop();
     flush_async_queue();
 
+    assert(async_avi_thread_running == false);
+
 	if (AVI_logfile != NULL) {
 		{
 			time_t n = time(NULL);
@@ -473,6 +475,9 @@ static void open_avi_file() {
 
 	if (AVI != NULL)
 		return;
+
+    assert(async_avi_thread_running == false);
+
 	if (v4l_width == 0 || v4l_height == 0)
 		return;
 	if ((AVI = avi_writer_create()) == NULL)
