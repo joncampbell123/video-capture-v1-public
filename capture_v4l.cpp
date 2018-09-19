@@ -2761,6 +2761,14 @@ int main(int argc,char **argv) {
 			/* ALSA thinks in "frames" not bytes.
 			 * don't read the data until we have 1/10th of a second ready to avoid AVI chunk overhead. */
 			if (avail >= min_avail || avail == 0/*why does ALSA not return any count until we readi?*/) {
+                if (async_io) {
+                    /* the reason we check here is audio capture limits the check interval to 15-30 times a second */
+                    async_avi_queue_lock();
+                    if (async_avi_queue.size() >= 256)
+                        fprintf(stderr,"WARNING: Async I/O queue backup, %zu items\n",async_avi_queue.size());
+                    async_avi_queue_unlock();
+                }
+
 				max = sizeof(fmp4_temp) / sizeof(int16_t) / audio_channels;
 				done = snd_pcm_readi(alsa_pcm, fmp4_temp, max);
 				if (done > 0) {
