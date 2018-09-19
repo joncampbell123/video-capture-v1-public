@@ -104,10 +104,53 @@ pthread_t                   async_avi_thread;
 volatile bool               async_avi_thread_running = false;
 volatile bool               async_avi_thread_die = false;
 
+void async_avi_queue_lock(void) {
+    if (pthread_mutex_lock(&async_avi_queue_mutex) != 0) {
+        fprintf(stderr,"Mutex queue lock failed\n");
+        abort();
+    }
+}
+
+void async_avi_queue_unlock(void) {
+    if (pthread_mutex_unlock(&async_avi_queue_mutex) != 0) {
+        fprintf(stderr,"Mutex queue unlock failed\n");
+        abort();
+    }
+}
+
+bool async_avi_queue_trylock(void) {
+    if (pthread_mutex_trylock(&async_avi_queue_mutex) != 0)
+        return false;
+
+    return true;
+}
+
 void *async_avi_thread_proc(void *arg) {
     while (!async_avi_thread_die) {
-        // TODO
-        usleep(10000);
+        if (async_avi_queue_trylock()) {
+            if (!async_avi_queue.empty()) {
+                // something in the queue. take it and unlock immediately.
+                AVIPacket *pkt = async_avi_queue.front();
+                async_avi_queue.pop_front();
+                async_avi_queue_unlock();
+
+                fprintf(stderr,"PACKET: data=%p len=%zu flags=0x%x stream=%u\n",
+                    pkt->data,pkt->data_length,pkt->avi_flags,pkt->stream);
+
+                // TODO: Do something
+
+                delete pkt;
+            }
+            else {
+                // nothing in the queue, unlock and sleep
+                async_avi_queue_unlock();
+                usleep(10000);
+            }
+        }
+        else {
+            // failed to lock, sleep and try again
+            usleep(1000);
+        }
     }
 
     async_avi_thread_running = false;
