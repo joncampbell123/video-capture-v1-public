@@ -2537,7 +2537,6 @@ int main(int argc,char **argv) {
 							if (avi_frame_counter < n) {
 								int patience = 1000;
 								while (patience-- > 0 && avi_frame_counter < n) {
-//									avi_writer_stream_write(AVI,AVI_video,NULL,0,0);
 									avi_frame_counter++;
 								}
 							}
@@ -2566,14 +2565,32 @@ int main(int argc,char **argv) {
 							if (rd > 0) {
 								int patience = 1000;
 
-								while (AVI_video->sample_write_chunk < pkt.dts && patience-- > 0)
-									avi_writer_stream_write(AVI,AVI_video,NULL,0,0);
+								while (AVI_video->sample_write_chunk < pkt.dts && patience-- > 0) {
+                                    if (async_io) {
+                                        AVIPacket *p = new AVIPacket();
+                                        p->stream = AVI_STREAM_VIDEO;
+                                        p->set_flags(0);
+                                        async_avi_queue_add(&p);
+                                    }
+                                    else {
+    									avi_writer_stream_write(AVI,AVI_video,NULL,0,0);
+                                    }
+                                }
 
-								if (avi_writer_stream_write(AVI,AVI_video,fmp4_temp,rd,
-									(pkt.flags&AV_PKT_FLAG_KEY) ? riff_idx1_AVIOLDINDEX_flags_KEYFRAME : 0)) {
-									avi_writer_stream_index *si = AVI_video->sample_index + AVI_video->sample_write_chunk - 1;
-									socket_index_msg("V",pkt.dts,si->offset,si->length,(pkt.flags&AV_PKT_FLAG_KEY)?1:0);
-								}
+                                if (async_io) {
+                                    AVIPacket *p = new AVIPacket();
+                                    p->stream = AVI_STREAM_VIDEO;
+                                    p->set_data(fmp4_temp,rd);
+                                    p->set_flags((pkt.flags&AV_PKT_FLAG_KEY) ? riff_idx1_AVIOLDINDEX_flags_KEYFRAME : 0);
+                                    async_avi_queue_add(&p);
+                                }
+                                else {
+    								if (avi_writer_stream_write(AVI,AVI_video,fmp4_temp,rd,
+	    								(pkt.flags&AV_PKT_FLAG_KEY) ? riff_idx1_AVIOLDINDEX_flags_KEYFRAME : 0)) {
+		    							avi_writer_stream_index *si = AVI_video->sample_index + AVI_video->sample_write_chunk - 1;
+			    						socket_index_msg("V",pkt.dts,si->offset,si->length,(pkt.flags&AV_PKT_FLAG_KEY)?1:0);
+				    				}
+                                }
 							}
 							else {
 								printf("Hm? No output on %llu\n",avi_frame_counter);
@@ -2644,7 +2661,6 @@ int main(int argc,char **argv) {
 							if (avi_vbi_frame_counter < n) {
 								int patience = 1000;
 								while (patience-- > 0 && avi_vbi_frame_counter < n) {
-//									avi_writer_stream_write(AVI,AVI_vbi_video,NULL,0,0);
 									avi_vbi_frame_counter++;
 								}
 							}
@@ -2673,11 +2689,29 @@ int main(int argc,char **argv) {
 							if (rd > 0) {
 								int patience = 1000;
 
-								while (AVI_vbi_video->sample_write_chunk < pkt.dts && patience-- > 0)
-									avi_writer_stream_write(AVI,AVI_vbi_video,NULL,0,0);
+								while (AVI_vbi_video->sample_write_chunk < pkt.dts && patience-- > 0) {
+                                    if (async_io) {
+                                        AVIPacket *p = new AVIPacket();
+                                        p->stream = AVI_STREAM_VBI;
+                                        p->set_flags(0);
+                                        async_avi_queue_add(&p);
+                                    }
+                                    else {
+                                        avi_writer_stream_write(AVI,AVI_vbi_video,NULL,0,0);
+                                    }
+                                }
 
-								avi_writer_stream_write(AVI,AVI_vbi_video,fmp4_temp,rd,
-									(pkt.flags&AV_PKT_FLAG_KEY) ? riff_idx1_AVIOLDINDEX_flags_KEYFRAME : 0);
+                                if (async_io) {
+                                    AVIPacket *p = new AVIPacket();
+                                    p->stream = AVI_STREAM_VBI;
+                                    p->set_data(fmp4_temp,rd);
+                                    p->set_flags((pkt.flags&AV_PKT_FLAG_KEY) ? riff_idx1_AVIOLDINDEX_flags_KEYFRAME : 0);
+                                    async_avi_queue_add(&p);
+                                }
+                                else {
+    								avi_writer_stream_write(AVI,AVI_vbi_video,fmp4_temp,rd,
+	    								(pkt.flags&AV_PKT_FLAG_KEY) ? riff_idx1_AVIOLDINDEX_flags_KEYFRAME : 0);
+                                }
 							}
 							else {
 								printf("Hm? No output on %llu\n",avi_vbi_frame_counter);
@@ -2791,8 +2825,18 @@ int main(int argc,char **argv) {
 								for (pi=0;pi < (pad*audio_channels);pi++)
 									((int16_t*)fmp4_yuv)[pi] = pi & 1; /* 0 1 0 1 ... */
 
-								// write audio
-								avi_writer_stream_write(AVI, AVI_audio, fmp4_yuv, pad*audio_channels*sizeof(int16_t), riff_idx1_AVIOLDINDEX_flags_KEYFRAME);
+                                // write audio
+                                if (async_io) {
+                                    AVIPacket *p = new AVIPacket();
+                                    p->stream = AVI_STREAM_AUDIO;
+                                    p->set_data(fmp4_yuv,pad*audio_channels*sizeof(int16_t));
+                                    p->set_flags(riff_idx1_AVIOLDINDEX_flags_KEYFRAME);
+                                    async_avi_queue_add(&p);
+                                }
+                                else {
+                                    avi_writer_stream_write(AVI, AVI_audio, fmp4_yuv, pad*audio_channels*sizeof(int16_t), riff_idx1_AVIOLDINDEX_flags_KEYFRAME);
+                                }
+
 								avi_audio_samples += (unsigned long)pad;
 							}
 							else if (avi_audio_err <= -((double)audio_rate * 0.1)) {
@@ -2810,7 +2854,16 @@ int main(int argc,char **argv) {
 							}
 
 							// write audio
-							avi_writer_stream_write(AVI, AVI_audio, fmp4_temp, b, riff_idx1_AVIOLDINDEX_flags_KEYFRAME);
+                            if (async_io) {
+                                AVIPacket *p = new AVIPacket();
+                                p->stream = AVI_STREAM_AUDIO;
+                                p->set_data(fmp4_temp,b);
+                                p->set_flags(riff_idx1_AVIOLDINDEX_flags_KEYFRAME);
+                                async_avi_queue_add(&p);
+                            }
+                            else {
+                                avi_writer_stream_write(AVI, AVI_audio, fmp4_temp, b, riff_idx1_AVIOLDINDEX_flags_KEYFRAME);
+                            }
 							avi_audio_samples += (unsigned long)done;
 						}
 					}
