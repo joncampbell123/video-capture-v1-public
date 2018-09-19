@@ -957,6 +957,8 @@ static void open_avi_file() {
 		return;
 	}
 
+    assert(async_avi_thread_running == false);
+
     if (async_io) async_avi_thread_start();
 }
 
