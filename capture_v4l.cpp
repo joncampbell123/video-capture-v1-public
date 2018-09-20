@@ -60,7 +60,7 @@ enum AVIPacketStream {
 
 class AVIPacket {
 public:
-    AVIPacket() : avi_flags(0), data(NULL), data_length(0), stream(AVI_STREAM_NONE), target_chunk(0) {
+    AVIPacket() : avi_flags(0), data(NULL), data_length(0), stream(AVI_STREAM_NONE), target_chunk(0), sequence(-1LL) {
     }
     ~AVIPacket() {
         free_data();
@@ -93,6 +93,7 @@ public:
     size_t                  data_length;
     enum AVIPacketStream    stream;
     unsigned long long      target_chunk;
+    signed long long        sequence;
 };
 
 /* WARNING: In async mode, this queue is used by main thread and disk I/O thread.
@@ -104,6 +105,7 @@ pthread_mutex_t             async_avi_queue_mutex = PTHREAD_MUTEX_INITIALIZER;
 pthread_t                   async_avi_thread;
 volatile bool               async_avi_thread_running = false;
 volatile bool               async_avi_thread_die = false;
+signed long long            async_avi_queue_counter = 0;
 
 void async_avi_queue_lock(void) {
     if (pthread_mutex_lock(&async_avi_queue_mutex) != 0) {
@@ -132,6 +134,7 @@ void async_avi_thread_start(void) {
     if (!async_avi_thread_running) {
         assert(async_avi_thread_die == false);
 
+        async_avi_queue_counter = 0;
         async_avi_thread_running = true;
         if (pthread_create(&async_avi_thread,NULL,async_avi_thread_proc,NULL)) {
             fprintf(stderr,"Async AVI thread start: failed\n");
@@ -313,6 +316,8 @@ bool async_avi_queue_add(AVIPacket **pkt) { // you give ownership of the pointer
         AVIPacket *p = *pkt;
         *pkt = NULL;
 
+        p->sequence = async_avi_queue_counter++;
+
         async_avi_queue_lock();
         async_avi_queue.push_back(p);
         async_avi_queue_unlock();
@@ -322,6 +327,8 @@ bool async_avi_queue_add(AVIPacket **pkt) { // you give ownership of the pointer
 }
 
 void *async_avi_thread_proc(void *arg) {
+    signed long long expect_pkt = 0;
+
     while (!async_avi_thread_die) {
         if (async_avi_queue_trylock()) {
             if (!async_avi_queue.empty()) {
@@ -330,6 +337,13 @@ void *async_avi_thread_proc(void *arg) {
                 AVIPacket *pkt = async_avi_queue.front();
                 async_avi_queue.pop_front();
                 async_avi_queue_unlock();
+
+                if (pkt->sequence != expect_pkt) {
+                    fprintf(stderr,"Async disk I/O thread warning: Packet sequence mismatch expect:%llu got:%llu\n",
+                        expect_pkt,pkt->sequence);
+                }
+
+                expect_pkt = pkt->sequence + 1;
 
 #if 0
                 fprintf(stderr,"PACKET: data=%p len=%zu flags=0x%x stream=%u target_chunk=%llu\n",
