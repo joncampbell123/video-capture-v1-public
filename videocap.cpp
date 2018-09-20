@@ -308,6 +308,8 @@ bool				use_x_shm = true;		/* use X shared memory segments */
 bool				use_xvideo = true;		/* use XVideo extension */
 int				xvideo_adapter = 0;		/* which adapter to use */
 
+unsigned int            zebra_counter = 0;
+
 bool				xvideo_supported = false;
 bool				x_shm_supported = false;
 
@@ -2107,6 +2109,29 @@ void yv12_to_client_area_rgb32(unsigned char *Y,size_t Ystride,unsigned char *U,
 
 void gui_status(const char *msg);
 
+void xv_draw_zebra(unsigned char *dY,unsigned int dYstride,unsigned char *dU,unsigned int dUstride,unsigned char *dV,unsigned int dVstride,unsigned int width,unsigned int height,unsigned int zebra) {
+    unsigned int maxY = (((235u - 16u) * zebra) / 100u) + 16u; /* assume 16-235 TV studio levels */
+    unsigned char *scanY = dY;
+    unsigned int m = zebra_counter >> 2;
+    unsigned int x,y;
+
+    /* assume for now that the chroma is decimated by 2 horizontally, 2 vertically (YV12) */
+
+    for (y=0;y < height;y++,m++) {
+        for (x=0;x < width;x++) {
+            unsigned char c = scanY[x];
+
+            if (c >= maxY) {
+                if ((m+x)&2) scanY[x] = 16;
+            }
+        }
+
+        scanY += dYstride;
+    }
+
+    zebra_counter++;
+}
+
 bool put_live_frame_on_screen(InputManager *input,bool force_redraw/*TODO*/) {
 	bool ret = false;
 	unsigned int yshr = 0;
@@ -2178,11 +2203,14 @@ bool put_live_frame_on_screen(InputManager *input,bool force_redraw/*TODO*/) {
 		for (y=0;y < height;y++)
 			memcpy(dY+(y*dYstride),Y+(y*stride),min((size_t)stride,dYstride));
 
-		for (y=0;y < height;y++)
+		for (y=0;y < height;y += 2)
 			memcpy(dU+((y>>1)*dUstride),U+((y>>yshr)*(stride>>1)),min((size_t)(stride>>1),dUstride));
 
-		for (y=0;y < height;y++)
+		for (y=0;y < height;y += 2)
 			memcpy(dV+((y>>1)*dVstride),V+((y>>yshr)*(stride>>1)),min((size_t)(stride>>1),dVstride));
+
+        if (CurrentInputObj()->zebra)
+            xv_draw_zebra(dY,dYstride,dU,dUstride,dV,dVstride,width,height,CurrentInputObj()->zebra);
 
 		ret = true;
 	}
