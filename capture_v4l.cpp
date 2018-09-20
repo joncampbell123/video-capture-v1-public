@@ -232,6 +232,8 @@ static int			v4l_index = -2;
 static bool			v4l_open_shut_up = 0;
 static bool         v4l_vbi_via_sysfs = true;
 
+static unsigned long long v4l_video_async_track = 0;
+
 static unsigned long long v4l_last_frame = 0,v4l_last_vbi = 0;
 static unsigned long long v4l_last_frame_delta = 0,v4l_last_vbi_delta = 0;
 
@@ -493,6 +495,8 @@ static void open_avi_file() {
 
 	if (AVI != NULL)
 		return;
+
+    v4l_video_async_track = 0;
 
     assert(async_avi_thread_running == false);
 
@@ -2631,6 +2635,25 @@ int main(int argc,char **argv) {
 						avi_frame_counter++;
 					}
 				}
+
+                if (async_io && AVI != NULL && AVI_video != NULL) {
+                    async_avi_queue_lock();
+
+                    while (v4l_video_async_track < AVI_video->sample_write_chunk) {
+                        avi_writer_stream_index *si = AVI_video->sample_index + v4l_video_async_track;
+
+                        if (si->length != 0 || (si->dwFlags & AV_PKT_FLAG_KEY) != 0) {
+                            socket_index_msg("V",v4l_video_async_track,si->offset,si->length,(si->dwFlags&riff_idx1_AVIOLDINDEX_flags_KEYFRAME)?1:0);
+                            v4l_video_async_track++;
+                            break;
+                        }
+                        else {
+                            v4l_video_async_track++;
+                        }
+                    }
+
+                    async_avi_queue_unlock();
+                }
 
 				vb->timestamp.tv_sec = 0;
 				vb->timestamp.tv_usec = 0;
