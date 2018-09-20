@@ -855,6 +855,8 @@ void load_config_section_input(const char *name,const char *value) {
 		iobj->vcrhack = value;
 	else if (!strcmp(name,"async io"))
 		iobj->async_io = atoi(value) > 0;
+    else if (!strcmp(name,"zebra"))
+        iobj->zebra = atoi(value);
 	else if (!strcmp(name,"crop")) {
 		iobj->crop_defrect = iobj->crop_bounds = false;
 		iobj->crop_left = iobj->crop_top = iobj->crop_width = iobj->crop_height = CROP_DEFAULT;
@@ -1043,6 +1045,7 @@ void save_configuration() {
 			fprintf(fp,"capture height = %d\n",iobj->capture_height);
 			fprintf(fp,"vcr hack = %s\n",iobj->vcrhack.c_str());
 			fprintf(fp,"async io = %d\n",iobj->async_io);
+            fprintf(fp,"zebra = %d\n",iobj->zebra);
 			fprintf(fp,"codec = %s\n",iobj->input_codec.c_str());
 
 			fprintf(fp,"crop = ");
