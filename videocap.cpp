@@ -206,6 +206,9 @@ public:
 	int				user_ar_n,user_ar_d;
 	int				source_ar_n,source_ar_d;
 
+    /* zebra marking */
+    int             zebra;
+
 	/* capture process */
 	int				cap_pid;			/* PID of the process */
 
@@ -398,6 +401,7 @@ GtkWidget*			main_window_control_stop = NULL;
 GtkWidget*			main_window_toolbar_stop = NULL;
 
 GtkRadioAction*			main_window_view_input_action = NULL;
+GtkRadioAction*			main_window_view_zebra_action = NULL;
 GtkRadioAction*			main_window_toolbar_input_action = NULL;
 
 GtkRadioAction*			main_window_view_aspect_action = NULL;
@@ -1189,6 +1193,13 @@ void update_ui_controls() {
 		gtk_radio_action_set_current_value (GTK_RADIO_ACTION(main_window_view_aspect_action), -1);
 	else
 		gtk_radio_action_set_current_value (GTK_RADIO_ACTION(main_window_view_aspect_action), 0);
+
+	if (CurrentInputObj()->zebra == 100)
+		gtk_radio_action_set_current_value (GTK_RADIO_ACTION(main_window_view_zebra_action), 100);
+	else if (CurrentInputObj()->zebra == 75)
+		gtk_radio_action_set_current_value (GTK_RADIO_ACTION(main_window_view_zebra_action), 75);
+	else
+		gtk_radio_action_set_current_value (GTK_RADIO_ACTION(main_window_view_zebra_action), 0);
 }
 
 void update_ui_inputs() {
@@ -3482,6 +3493,7 @@ void InputManager::close_shmem() {
 }
 
 InputManager::InputManager(int input_index) {
+    zebra = 0;
 	video_avcodec_ctx = NULL;
 	video_avcodec = NULL;
 	play_is_rec = false;
@@ -3792,6 +3804,16 @@ static void on_main_window_view_aspect_ratio_select(GtkMenuItem *menuitem,gpoint
 		if (video_should_redraw_t < 0) video_should_redraw_t = NOW + 0.5;
 		update_ui();
 	}
+}
+
+/* ----------------------- VIEW -> ZEBRA -> ... -------------------------------*/
+static void on_main_window_view_zebra_select(GtkMenuItem *menuitem,gpointer user_data) { /* View -> Input select */
+	int x = gtk_radio_action_get_current_value (GTK_RADIO_ACTION(main_window_view_zebra_action));
+    if (CurrentInputObj()->zebra != x) {
+        CurrentInputObj()->zebra = x;
+        fprintf(stderr,"Zebra: %d%%\n",x);
+        update_ui();
+    }
 }
 
 /* ----------------------- VIEW -> INPUT -> ... -------------------------------*/
@@ -5784,6 +5806,8 @@ static GtkActionEntry gtk_all_actions[] = {
 
 	{"ViewMenuInput",	NULL,			"_Input"},
 
+	{"ViewMenuZebra",	NULL,			"_Zebra"},
+
 	{"ControlMenu",		NULL,			"_Control"},
 
 	{"PreferencesMenu",	NULL,			"_Preferences"},
@@ -5878,6 +5902,11 @@ static const gchar *ui_info =
 "	 <menuitem action='ViewMenuAspectRatio_4x3'/>"
 "	 <menuitem action='ViewMenuAspectRatio_16x9'/>"
 "	 <menuitem action='ViewMenuAspectRatio_Dont'/>"
+"      </menu>"
+"      <menu action='ViewMenuZebra'>"
+"	 <menuitem action='ViewMenuZebra_None'/>"
+"	 <menuitem action='ViewMenuZebra_75'/>"
+"	 <menuitem action='ViewMenuZebra_100'/>"
 "      </menu>"
 "      <menuitem action='ViewMenuOSD'/>"
 "    </menu>"
@@ -6318,6 +6347,32 @@ static int init_main_window()
 	gtk_action_group_add_action (action_group, GTK_ACTION(rad_act));
 	g_signal_connect(rad_act, "changed",
 			G_CALLBACK(on_main_window_view_input_select),
+			NULL);
+
+	/* View zebra menu */
+	rad_act = gtk_radio_action_new ("ViewMenuZebra_None", "_None", "Switch off zebra", NULL, 0);
+	gtk_radio_action_set_group (rad_act, NULL);
+	gslist = gtk_radio_action_get_group (rad_act);
+	gtk_action_group_add_action (action_group, GTK_ACTION(rad_act));
+	g_signal_connect(rad_act, "changed",
+			G_CALLBACK(on_main_window_view_zebra_select),
+			NULL);
+	main_window_view_zebra_action = rad_act;
+
+	rad_act = gtk_radio_action_new ("ViewMenuZebra_75", "_75%", "Show zebra at 75%", NULL, 75);
+	gtk_radio_action_set_group (rad_act, gslist);
+	gslist = gtk_radio_action_get_group (rad_act);
+	gtk_action_group_add_action (action_group, GTK_ACTION(rad_act));
+	g_signal_connect(rad_act, "changed",
+			G_CALLBACK(on_main_window_view_zebra_select),
+			NULL);
+
+	rad_act = gtk_radio_action_new ("ViewMenuZebra_100", "_100%", "Show zebra at 100%", NULL, 100);
+	gtk_radio_action_set_group (rad_act, gslist);
+	gslist = gtk_radio_action_get_group (rad_act);
+	gtk_action_group_add_action (action_group, GTK_ACTION(rad_act));
+	g_signal_connect(rad_act, "changed",
+			G_CALLBACK(on_main_window_view_zebra_select),
 			NULL);
 
 	/* Record button */
