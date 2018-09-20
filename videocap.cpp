@@ -5784,6 +5784,14 @@ static GtkActionEntry gtk_all_actions[] = {
 
 	{"ViewMenuInput",	NULL,			"_Input"},
 
+	{"ViewMenuZebra",	NULL,			"_Zebra"},
+
+    {"ViewMenuZebra_None",  NULL,       "Off"},
+
+    {"ViewMenuZebra_75",    NULL,       "75%"},
+
+    {"ViewMenuZebra_100",   NULL,       "100%"},
+
 	{"ControlMenu",		NULL,			"_Control"},
 
 	{"PreferencesMenu",	NULL,			"_Preferences"},
@@ -5878,6 +5886,11 @@ static const gchar *ui_info =
 "	 <menuitem action='ViewMenuAspectRatio_4x3'/>"
 "	 <menuitem action='ViewMenuAspectRatio_16x9'/>"
 "	 <menuitem action='ViewMenuAspectRatio_Dont'/>"
+"      </menu>"
+"      <menu action='ViewMenuZebra'>"
+"	 <menuitem action='ViewMenuZebra_None'/>"
+"	 <menuitem action='ViewMenuZebra_75'/>"
+"	 <menuitem action='ViewMenuZebra_100'/>"
 "      </menu>"
 "      <menuitem action='ViewMenuOSD'/>"
 "    </menu>"
