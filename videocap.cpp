@@ -237,6 +237,7 @@ public:
 	int				capture_height;
 	bool				crop_bounds;
 	bool				crop_defrect;
+	bool				swap_fields;
     bool                async_io;
 	int				crop_left,crop_top,crop_width,crop_height;
     double              capture_fps;
@@ -293,7 +294,8 @@ GtkWidget*			input_dialog_vcrhack = NULL;
 GtkWidget*			input_dialog_vbi_enable = NULL;
 GtkWidget*			input_dialog_def_crop = NULL;
 GtkWidget*			input_dialog_bounds_crop = NULL;
-GtkWidget*          input_dialog_async_io = NULL;
+GtkWidget*          		input_dialog_async_io = NULL;
+GtkWidget*			input_dialog_swap_fields = NULL;
 GtkWidget*			audio_dialog = NULL;
 GtkWidget*			audio_dialog_device = NULL;
 GtkWidget*			audio_dialog_enable = NULL;
@@ -3261,6 +3263,9 @@ bool InputManager::start_process() {
 	if (async_io)
 		argv[argc++] = "--async-io";
 
+	if (swap_fields)
+		argv[argc++] = "--swap-fields";
+
 	char crop_l[64],crop_t[64],crop_w[64],crop_h[64];
 	if (crop_bounds)
 		argv[argc++] = "--cropbound";
@@ -3540,6 +3545,7 @@ InputManager::InputManager(int input_index) {
 	capture_width = 0;
 	capture_height = 0;
     capture_fps = 0;
+    swap_fields = false;
 	crop_defrect = false;
 	crop_bounds = false;
     async_io = true;
@@ -4258,6 +4264,7 @@ static void update_input_dialog_from_vars() {
 	gtk_toggle_button_set_active (GTK_TOGGLE_BUTTON(input_dialog_def_crop), CurrentInputObj()->crop_defrect);
 	gtk_toggle_button_set_active (GTK_TOGGLE_BUTTON(input_dialog_bounds_crop), CurrentInputObj()->crop_bounds);
 	gtk_toggle_button_set_active (GTK_TOGGLE_BUTTON(input_dialog_async_io), CurrentInputObj()->async_io);
+	gtk_toggle_button_set_active (GTK_TOGGLE_BUTTON(input_dialog_swap_fields), CurrentInputObj()->swap_fields);
 
 	/* input select */
 	model = gtk_combo_box_get_model (GTK_COMBO_BOX(input_dialog_device));
@@ -4372,6 +4379,10 @@ static bool update_vars_from_input_dialog() {
 	tmp = gtk_toggle_button_get_active (GTK_TOGGLE_BUTTON(input_dialog_async_io)) > 0;
 	if (tmp != CurrentInputObj()->async_io) do_reopen = true;
 	CurrentInputObj()->async_io = tmp;
+
+	tmp = gtk_toggle_button_get_active (GTK_TOGGLE_BUTTON(input_dialog_swap_fields)) > 0;
+	if (tmp != CurrentInputObj()->swap_fields) do_reopen = true;
+	CurrentInputObj()->swap_fields = tmp;
 
 	/* input */
 	active = gtk_combo_box_get_active (GTK_COMBO_BOX(input_dialog_device));
@@ -4862,6 +4873,14 @@ void create_input_dialog() {
 
 	input_dialog_async_io = gtk_check_button_new_with_label ("Asynchronous disk I/O (recommended)");
 	gtk_container_add (GTK_CONTAINER(hbox), input_dialog_async_io);
+
+	gtk_container_add (GTK_CONTAINER(vbox), hbox);
+
+
+	hbox = gtk_hbox_new (FALSE, 0);
+
+	input_dialog_swap_fields = gtk_check_button_new_with_label ("Swap fields (broken capture drivers)");
+	gtk_container_add (GTK_CONTAINER(hbox), input_dialog_swap_fields);
 
 	gtk_container_add (GTK_CONTAINER(vbox), hbox);
 
