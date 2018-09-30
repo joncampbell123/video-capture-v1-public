@@ -2027,7 +2027,12 @@ void copy_yuyv_to_planar_yuv_422(unsigned char *framep[3],int stride[3],unsigned
 			Y = framep[0] + ( (y+0)       * stride[0]);
 			U = framep[1] + ( (y+0)       * stride[1]);
 			V = framep[2] + ( (y+0)       * stride[2]);
-			src = (unsigned char*)sdi + ((y+0) * srcs);
+
+			if (swap_fields) /* dumbass capture card drivers */
+				src = (unsigned char*)sdi + (((y^1)+0) * srcs);
+			else
+				src = (unsigned char*)sdi + ((y+0) * srcs);
+
 			for (x=0;x < (unsigned int)v4l_width;x += 2) {
 				/* Y U Y V */
 				Y[0] = src[0];
@@ -2084,7 +2089,12 @@ void copy_uyvy_to_planar_yuv_422(unsigned char *framep[3],int stride[3],unsigned
 			Y = framep[0] + ( (y+0)       * stride[0]);
 			U = framep[1] + ( (y+0)       * stride[1]);
 			V = framep[2] + ( (y+0)       * stride[2]);
-			src = (unsigned char*)sdi + ((y+0) * srcs);
+
+			if (swap_fields) /* dumbass capture card drivers */
+				src = (unsigned char*)sdi + (((y^1)+0) * srcs);
+			else
+				src = (unsigned char*)sdi + ((y+0) * srcs);
+
 			for (x=0;x < (unsigned int)v4l_width;x += 2) {
 				/* U Y V Y */
 				Y[0] = src[1];
