@@ -196,6 +196,8 @@ static struct v4l2_format	v4l_vbi_capfmt;
 static unsigned char*		vbi_buffer = NULL;		/* [vbi_width * vbi_height] */
 static unsigned int		vbi_read_field = 0;
 
+static bool			swap_fields = false;
+
 static bool             async_io = false;
 
 static double			avi_audio_err = 0;
@@ -1050,6 +1052,9 @@ static int parse_argv(int argc,char **argv) {
 			else if (!strcmp(a,"codec")) {
 				want_codec_sel = argv[i++];
 			}
+		else if (!strcmp(a,"swap-fields")) {
+			swap_fields = true;
+		}
             else if (!strcmp(a,"async-io")) {
                 async_io = true;
 			}
