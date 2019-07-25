@@ -570,7 +570,7 @@ static void open_avi_file() {
 	fmp4_context->thread_type |= FF_THREAD_FRAME;
 //	fmp4_context->flags2 |= CODEC_FLAG2_FAST;
 //	fmp4_context->flags |= CODEC_FLAG_LOW_DELAY;
-	if (v4l_interlaced >= 0) fmp4_context->flags |= CODEC_FLAG_INTERLACED_DCT;
+	if (v4l_interlaced >= 0) fmp4_context->flags |= AV_CODEC_FLAG_INTERLACED_DCT;
 
 	fprintf(stderr,"Encoder using %u threads\n",how_many_cpus());
 

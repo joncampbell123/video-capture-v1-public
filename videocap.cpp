@@ -706,7 +706,7 @@ bool InputManager::load_external_avi_for_play(const char *path) {
 					 *      so that eventually we can capture with B-frames and still allow
 					 *      random access. */
 //					video_avcodec_ctx->thread_type |= FF_THREAD_FRAME;
-					video_avcodec_ctx->flags2 |= CODEC_FLAG2_FAST;
+					video_avcodec_ctx->flags2 |= AV_CODEC_FLAG2_FAST;
 					if (avcodec_open2(video_avcodec_ctx,video_avcodec,NULL)) {
 						fprintf(stderr,"Failed to open codec\n");
 						av_free(video_avcodec_ctx);
@@ -2788,7 +2788,7 @@ void InputManager::codec_check() {
 				 *      so that eventually we can capture with B-frames and still allow
 				 *      random access. */
 //				video_avcodec_ctx->thread_type |= FF_THREAD_FRAME;
-				video_avcodec_ctx->flags2 |= CODEC_FLAG2_FAST;
+				video_avcodec_ctx->flags2 |= AV_CODEC_FLAG2_FAST;
 				if (avcodec_open2(video_avcodec_ctx,video_avcodec,NULL)) {
 					fprintf(stderr,"Failed to open H264 codec\n");
 					av_free(video_avcodec_ctx);
