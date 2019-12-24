@@ -2446,7 +2446,10 @@ int main(int argc,char **argv) {
 							/* NOTE: The Linux kernel API says the timestamp can come from the device,
 							 *       or from other parts of the Video4Linux API. It never said anything
 							 *       about the time matching the system clock, it could be anything.
-							 *       So we have to subtract and add to translate the clock value. */
+							 *       So we have to subtract and add to translate the clock value.
+							 *
+							 *       2019/12/24: Testing with a USB capture device shows timestamps that
+							 *                   match /proc/uptime! */
 							framt = (double)vb->timestamp.tv_sec +
 								(((double)vb->timestamp.tv_usec) / 1000000);
 
