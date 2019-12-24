@@ -2455,7 +2455,7 @@ int main(int argc,char **argv) {
 
 							if (v4l_basetime < 0) {
 								v4l_basetime = framt;
-								v4l_baseclock = NOW;
+								v4l_baseclock = avi_file_start_time;
 							}
 
 							framt -= v4l_basetime;
