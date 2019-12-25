@@ -238,6 +238,7 @@ public:
 	bool				crop_bounds;
 	bool				crop_defrect;
 	bool				swap_fields;
+    bool                jpeg_yuv;
     bool                async_io;
 	int				crop_left,crop_top,crop_width,crop_height;
     double              capture_fps;
@@ -296,6 +297,7 @@ GtkWidget*			input_dialog_def_crop = NULL;
 GtkWidget*			input_dialog_bounds_crop = NULL;
 GtkWidget*          		input_dialog_async_io = NULL;
 GtkWidget*			input_dialog_swap_fields = NULL;
+GtkWidget*          input_dialog_jpeg_yuv = NULL;
 GtkWidget*			audio_dialog = NULL;
 GtkWidget*			audio_dialog_device = NULL;
 GtkWidget*			audio_dialog_enable = NULL;
@@ -859,6 +861,10 @@ void load_config_section_input(const char *name,const char *value) {
 		iobj->vcrhack = value;
 	else if (!strcmp(name,"async io"))
 		iobj->async_io = atoi(value) > 0;
+	else if (!strcmp(name,"swap fields"))
+		iobj->swap_fields = atoi(value) > 0;
+	else if (!strcmp(name,"jpeg yuv"))
+		iobj->jpeg_yuv = atoi(value) > 0;
     else if (!strcmp(name,"zebra"))
         iobj->zebra = atoi(value);
 	else if (!strcmp(name,"crop")) {
@@ -1048,6 +1054,8 @@ void save_configuration() {
 			fprintf(fp,"capture width = %d\n",iobj->capture_width);
 			fprintf(fp,"capture height = %d\n",iobj->capture_height);
 			fprintf(fp,"vcr hack = %s\n",iobj->vcrhack.c_str());
+            fprintf(fp,"swap fields = %d\n",iobj->swap_fields);
+            fprintf(fp,"jpeg yuv = %d\n",iobj->jpeg_yuv);
 			fprintf(fp,"async io = %d\n",iobj->async_io);
             fprintf(fp,"zebra = %d\n",iobj->zebra);
 			fprintf(fp,"codec = %s\n",iobj->input_codec.c_str());
@@ -3266,6 +3274,9 @@ bool InputManager::start_process() {
 	if (swap_fields)
 		argv[argc++] = "--swap-fields";
 
+	if (jpeg_yuv)
+		argv[argc++] = "--jpeg-yuv";
+
 	char crop_l[64],crop_t[64],crop_w[64],crop_h[64];
 	if (crop_bounds)
 		argv[argc++] = "--cropbound";
@@ -3546,6 +3557,7 @@ InputManager::InputManager(int input_index) {
 	capture_height = 0;
     capture_fps = 0;
     swap_fields = false;
+    jpeg_yuv = false;
 	crop_defrect = false;
 	crop_bounds = false;
     async_io = true;
@@ -4265,6 +4277,7 @@ static void update_input_dialog_from_vars() {
 	gtk_toggle_button_set_active (GTK_TOGGLE_BUTTON(input_dialog_bounds_crop), CurrentInputObj()->crop_bounds);
 	gtk_toggle_button_set_active (GTK_TOGGLE_BUTTON(input_dialog_async_io), CurrentInputObj()->async_io);
 	gtk_toggle_button_set_active (GTK_TOGGLE_BUTTON(input_dialog_swap_fields), CurrentInputObj()->swap_fields);
+	gtk_toggle_button_set_active (GTK_TOGGLE_BUTTON(input_dialog_jpeg_yuv), CurrentInputObj()->jpeg_yuv);
 
 	/* input select */
 	model = gtk_combo_box_get_model (GTK_COMBO_BOX(input_dialog_device));
@@ -4383,6 +4396,10 @@ static bool update_vars_from_input_dialog() {
 	tmp = gtk_toggle_button_get_active (GTK_TOGGLE_BUTTON(input_dialog_swap_fields)) > 0;
 	if (tmp != CurrentInputObj()->swap_fields) do_reopen = true;
 	CurrentInputObj()->swap_fields = tmp;
+
+	tmp = gtk_toggle_button_get_active (GTK_TOGGLE_BUTTON(input_dialog_jpeg_yuv)) > 0;
+	if (tmp != CurrentInputObj()->jpeg_yuv) do_reopen = true;
+	CurrentInputObj()->jpeg_yuv = tmp;
 
 	/* input */
 	active = gtk_combo_box_get_active (GTK_COMBO_BOX(input_dialog_device));
@@ -4881,6 +4898,14 @@ void create_input_dialog() {
 
 	input_dialog_swap_fields = gtk_check_button_new_with_label ("Swap fields (broken capture drivers)");
 	gtk_container_add (GTK_CONTAINER(hbox), input_dialog_swap_fields);
+
+	gtk_container_add (GTK_CONTAINER(vbox), hbox);
+
+
+	hbox = gtk_hbox_new (FALSE, 0);
+
+	input_dialog_jpeg_yuv = gtk_check_button_new_with_label ("JPEG range YUV");
+	gtk_container_add (GTK_CONTAINER(hbox), input_dialog_jpeg_yuv);
 
 	gtk_container_add (GTK_CONTAINER(vbox), hbox);
 

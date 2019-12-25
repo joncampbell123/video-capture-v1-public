@@ -193,6 +193,8 @@ static unsigned int		audio_max_level[4] = {0,0,0,0};
 static struct v4l2_capability	v4l_vbi_cap;
 static struct v4l2_format	v4l_vbi_capfmt;
 
+static bool                 jpeg_yuv = false;
+
 static unsigned char*		vbi_buffer = NULL;		/* [vbi_width * vbi_height] */
 static unsigned int		vbi_read_field = 0;
 
@@ -543,9 +545,9 @@ static void open_avi_file() {
 	fmp4_context->max_b_frames = 0; /* don't use B-frames */
 
 	if (v4l_codec_yshr == 0)
-		fmp4_context->pix_fmt = AV_PIX_FMT_YUV422P;
+		fmp4_context->pix_fmt = jpeg_yuv ? AV_PIX_FMT_YUVJ422P : AV_PIX_FMT_YUV422P;
 	else
-		fmp4_context->pix_fmt = AV_PIX_FMT_YUV420P;
+		fmp4_context->pix_fmt = jpeg_yuv ? AV_PIX_FMT_YUVJ420P : AV_PIX_FMT_YUV420P;
 
 	fmp4_context->bit_rate_tolerance = fmp4_context->bit_rate / 2;
 	fmp4_context->noise_reduction = 0;
@@ -1017,6 +1019,7 @@ static void help() {
 	fprintf(stderr,"    -vbi-first <x>                         Open VBI first, then init video (1=yes 0=no -1=auto)\n");
     fprintf(stderr,"    -no-vbi-sysfs                          Don't use sysfs to find vbi device\n");
     fprintf(stderr,"    -fps <n>                               Capture fps\n");
+    fprintf(stderr,"    -jpeg-yuv                              YUV is JPEG scale (0-255), else broadcast (16-235)\n");
 }
 
 static int parse_argv(int argc,char **argv) {
@@ -1033,6 +1036,9 @@ static int parse_argv(int argc,char **argv) {
 				help();
 				return 1;
 			}
+            else if (!strcmp(a,"jpeg-yuv")) {
+                jpeg_yuv = true;
+            }
             else if (!strcmp(a,"no-vbi-sysfs")) {
                 v4l_vbi_via_sysfs = false;
             }
