@@ -2442,7 +2442,7 @@ int main(int argc,char **argv) {
 					if (ioctl(v4l_fd,VIDIOC_DQBUF,&v4l_buf[v4l_bufptr]) == 0) {
 						vb = &v4l_buf[v4l_bufptr];
 						ptr = v4l_ptr[v4l_bufptr];
-						if (vb->timestamp.tv_sec > 0) {
+						if (vb->timestamp.tv_sec > 0 && AVI != NULL) {
 							/* NOTE: The Linux kernel API says the timestamp can come from the device,
 							 *       or from other parts of the Video4Linux API. It never said anything
 							 *       about the time matching the system clock, it could be anything.
@@ -2589,7 +2589,7 @@ int main(int argc,char **argv) {
 
 						if (framt > 0) {
 							double t = ((framt - avi_file_start_time) * v4l_framerate_n) / v4l_framerate_d;
-							if (t < -100) fprintf(stderr,"Warning: Frame time away behind AVI start time\n");
+							if (t < -100) fprintf(stderr,"Warning: Frame time away behind AVI start time t=%.3f framt=%.3f avi_start=%.3f bt=%.3f bc=%.3f\n",t,framt,avi_file_start_time,v4l_basetime,v4l_baseclock);
 							if (t < 0) t = 0;
 							unsigned long long n = (unsigned long long)floor(t+0.5);
 
@@ -2726,7 +2726,7 @@ int main(int argc,char **argv) {
 
 						if (framt > 0) {
 							double t = ((framt - avi_file_start_time) * v4l_framerate_n) / v4l_framerate_d;
-							if (t < -100) fprintf(stderr,"Warning: Frame time away behind AVI start time\n");
+							if (t < -100) fprintf(stderr,"Warning: Frame time away behind AVI start time t=%.3f framt=%.3f avi_start=%.3f bt=%.3f bc=%.3f\n",t,framt,avi_file_start_time,v4l_basetime,v4l_baseclock);
 							if (t < 0) t = 0;
 							unsigned long long n = (unsigned long long)floor(t+0.5);
 
@@ -2868,8 +2868,11 @@ int main(int argc,char **argv) {
 								avi_audio_err = (double)samp_should - (double)avi_audio_samples;
 							}
 							else {
-								avi_audio_err *= 0.95;
-								avi_audio_err += ((double)samp_should - (double)avi_audio_samples) * (1.0 - 0.95);
+								const double smoothing = 0.1;
+
+								avi_audio_err =
+									(avi_audio_err * smoothing) +
+									(((double)samp_should - (double)avi_audio_samples) * (1.0 - smoothing));
 							}
 
 							// add/remove padding to keep sync
