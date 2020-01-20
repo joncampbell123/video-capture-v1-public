@@ -108,6 +108,8 @@ enum {
 	VIEW_INPUT_2,			/* capture device 2 */
 	VIEW_INPUT_3,			/* capture device 3 */
 	VIEW_INPUT_4,			/* capture device 4 */
+	VIEW_INPUT_5,			/* capture device 5 */
+	VIEW_INPUT_6,			/* capture device 6 */
 	VIEW_INPUT_IP,			/* IP input */
 	VIEW_INPUT_MAX			/* -------------------- */
 };
@@ -429,6 +431,12 @@ GtkWidget*			main_window_toolbar_input_3 = NULL;
 
 GtkWidget*			main_window_view_input_4 = NULL;
 GtkWidget*			main_window_toolbar_input_4 = NULL;
+
+GtkWidget*			main_window_view_input_5 = NULL;
+GtkWidget*			main_window_toolbar_input_5 = NULL;
+
+GtkWidget*			main_window_view_input_6 = NULL;
+GtkWidget*			main_window_toolbar_input_6 = NULL;
 
 GtkWidget*			main_window_view_input_ip = NULL;
 GtkWidget*			main_window_toolbar_input_ip = NULL;
@@ -1108,7 +1116,7 @@ int init_inputs() {
 			return 1;
 		}
 
-		if (i >= VIEW_INPUT_1 && i <= VIEW_INPUT_4) {
+		if (i >= VIEW_INPUT_1 && i <= VIEW_INPUT_6) {
 			Input[i]->video_index = i - VIEW_INPUT_1;
 			sprintf(Input[i]->file_prefix,"input%d-",i-VIEW_INPUT_1+1);
 			sprintf(Input[i]->osd_name,"Video #%d",i-VIEW_INPUT_1+1);
@@ -5970,6 +5978,8 @@ static const gchar *ui_info =
 "	 <menuitem action='ViewMenuInput_Input2'/>"
 "	 <menuitem action='ViewMenuInput_Input3'/>"
 "	 <menuitem action='ViewMenuInput_Input4'/>"
+"	 <menuitem action='ViewMenuInput_Input5'/>"
+"	 <menuitem action='ViewMenuInput_Input6'/>"
 "	 <menuitem action='ViewMenuInput_InputIP'/>"
 "      </menu>"
 "      <menu action='ViewMenuAspectRatio'>"
@@ -6020,6 +6030,8 @@ static const gchar *ui_info =
 "    <toolitem action='ViewInput_Input2'/>"
 "    <toolitem action='ViewInput_Input3'/>"
 "    <toolitem action='ViewInput_Input4'/>"
+"    <toolitem action='ViewInput_Input5'/>"
+"    <toolitem action='ViewInput_Input6'/>"
 "    <toolitem action='ViewInput_InputIP'/>"
 "  </toolbar>"
 "</ui>";
@@ -6069,7 +6081,7 @@ static gint on_video_key_press_event(GtkWidget *widget, GdkEventKey *ev) {
 			update_ui();
 		}
 	}
-	else if (ev->keyval >= '1' && ev->keyval <= '4') {
+	else if (ev->keyval >= '1' && ev->keyval <= '6') {
 		int target = (ev->keyval - '1') + VIEW_INPUT_1;
 		if (CurrentInput != target) {
 			switch_input(target);
@@ -6416,6 +6428,22 @@ static int init_main_window()
 			G_CALLBACK(on_main_window_view_input_select),
 			NULL);
 
+	rad_act = gtk_radio_action_new ("ViewMenuInput_Input5", "Input _5", "Switch to input #5", NULL, VIEW_INPUT_5);
+	gtk_radio_action_set_group (rad_act, gslist);
+	gslist = gtk_radio_action_get_group (rad_act);
+	gtk_action_group_add_action (action_group, GTK_ACTION(rad_act));
+	g_signal_connect(rad_act, "changed",
+			G_CALLBACK(on_main_window_view_input_select),
+			NULL);
+
+	rad_act = gtk_radio_action_new ("ViewMenuInput_Input6", "Input _6", "Switch to input #6", NULL, VIEW_INPUT_6);
+	gtk_radio_action_set_group (rad_act, gslist);
+	gslist = gtk_radio_action_get_group (rad_act);
+	gtk_action_group_add_action (action_group, GTK_ACTION(rad_act));
+	g_signal_connect(rad_act, "changed",
+			G_CALLBACK(on_main_window_view_input_select),
+			NULL);
+
 	rad_act = gtk_radio_action_new ("ViewMenuInput_InputIP", "_IP", "Switch to IP input", NULL, VIEW_INPUT_IP);
 	gtk_radio_action_set_group (rad_act, gslist);
 	gslist = gtk_radio_action_get_group (rad_act);
@@ -6532,6 +6560,24 @@ static int init_main_window()
 
 	/* Input: Input 4 button */
 	rad_act = gtk_radio_action_new ("ViewInput_Input4", " 4 ", "Switch to input #4", NULL, VIEW_INPUT_4);
+	gtk_radio_action_set_group (rad_act, gslist);
+	gslist = gtk_radio_action_get_group (rad_act);
+	gtk_action_group_add_action (action_group, GTK_ACTION(rad_act));
+	g_signal_connect(rad_act, "changed",
+			G_CALLBACK(on_main_window_input_select),
+			NULL);
+
+	/* Input: Input 5 button */
+	rad_act = gtk_radio_action_new ("ViewInput_Input5", " 5 ", "Switch to input #5", NULL, VIEW_INPUT_5);
+	gtk_radio_action_set_group (rad_act, gslist);
+	gslist = gtk_radio_action_get_group (rad_act);
+	gtk_action_group_add_action (action_group, GTK_ACTION(rad_act));
+	g_signal_connect(rad_act, "changed",
+			G_CALLBACK(on_main_window_input_select),
+			NULL);
+
+	/* Input: Input 6 button */
+	rad_act = gtk_radio_action_new ("ViewInput_Input6", " 6 ", "Switch to input #6", NULL, VIEW_INPUT_6);
 	gtk_radio_action_set_group (rad_act, gslist);
 	gslist = gtk_radio_action_get_group (rad_act);
 	gtk_action_group_add_action (action_group, GTK_ACTION(rad_act));
@@ -6825,6 +6871,22 @@ static int init_main_window()
 
 	tmp = gtk_ui_manager_get_widget (main_window_ui_mgr, "/MenuBar/ViewMenu/ViewMenuInput/ViewMenuInput_Input4");
 	main_window_view_input_4 = tmp;
+
+	/* input: 1 button */
+	tmp = gtk_ui_manager_get_widget (main_window_ui_mgr, "/ToolBar/ViewInput_Input5");
+	gtk_tool_item_set_homogeneous (GTK_TOOL_ITEM(tmp), FALSE);
+	main_window_toolbar_input_5 = tmp;
+
+	tmp = gtk_ui_manager_get_widget (main_window_ui_mgr, "/MenuBar/ViewMenu/ViewMenuInput/ViewMenuInput_Input5");
+	main_window_view_input_5 = tmp;
+
+	/* input: 1 button */
+	tmp = gtk_ui_manager_get_widget (main_window_ui_mgr, "/ToolBar/ViewInput_Input6");
+	gtk_tool_item_set_homogeneous (GTK_TOOL_ITEM(tmp), FALSE);
+	main_window_toolbar_input_6 = tmp;
+
+	tmp = gtk_ui_manager_get_widget (main_window_ui_mgr, "/MenuBar/ViewMenu/ViewMenuInput/ViewMenuInput_Input6");
+	main_window_view_input_6 = tmp;
 
 	/* input: IP button */
 	tmp = gtk_ui_manager_get_widget (main_window_ui_mgr, "/ToolBar/ViewInput_InputIP");
