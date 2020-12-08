@@ -446,8 +446,6 @@ GtkWidget*			main_window_view_osd = NULL;
 GSList*				ui_notification_log = NULL;
 
 /* secondary thread for video playback, and mutex to prevent conflicts */
-pthread_t			secondary_thread_id = 0;
-volatile int			secondary_thread_must_die = 0;
 pthread_mutex_t			global_mutex = PTHREAD_MUTEX_INITIALIZER; /* TODO: remove this */
 
 int				CurrentInput = VIEW_INPUT_OFF;
@@ -470,7 +468,6 @@ void client_area_redraw_source_frame(bool total=false);
 void client_area_get_aspect_from_current_input();
 void client_area_draw_overlay_borders();
 void client_area_update_rects_again();
-void secondary_thread_shutdown();
 
 /* C/C++ implementation of Perl's chomp command */
 void chomp(char *s) {
@@ -3908,7 +3905,6 @@ static void on_main_window_menu_with_audio(GtkMenuItem *menuitem,gpointer user_d
 
 
 static void on_main_window_file_destroy(GtkMenuItem *menuitem,gpointer user_data) {
-	secondary_thread_shutdown();
 	gtk_main_quit();
 }
 
@@ -6971,23 +6967,6 @@ static void free_application_icon() {
 	}
 }
 
-/* TODO: Remove me */
-void *secondary_thread(void *p) {
-	while (!secondary_thread_must_die) {
-		usleep(100000);
-	}
-}
-
-void secondary_thread_shutdown() {
-	secondary_thread_must_die = 1;
-	if (secondary_thread_id != 0) {
-		pthread_join(secondary_thread_id,NULL);
-		secondary_thread_id = 0;
-	}
-	pthread_mutex_destroy(&global_mutex);
-	assert(pthread_mutex_init(&global_mutex,NULL) == 0); // global_mutex = PTHREAD_MUTEX_INITIALIZER;
-}
-
 int main(int argc,char **argv) {
 	gtk_init(&argc,&argv);
 	if (!XInitThreads())
@@ -7012,12 +6991,6 @@ int main(int argc,char **argv) {
 		return 1;
 	}
 
-	/* start thread */
-	if (pthread_create(&secondary_thread_id,NULL,secondary_thread,NULL)) {
-		g_error("Cannot start secondary thread");
-		return 1;
-	}
-
 	/* TODO: This will be updated later */
 	client_area_width = -1;
 	client_area_height = -1;
@@ -7027,7 +7000,6 @@ int main(int argc,char **argv) {
 /* the GTK+ library takes over from here to run the "message pump" and handle events */
 /* the GTK+ will return control to us when instructed to terminate and it has freed the windows and widgets */
 	gtk_main();
-	secondary_thread_shutdown();
 	save_configuration();
 
 /* cleanup after ourself */
