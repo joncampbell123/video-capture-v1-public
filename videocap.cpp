@@ -6179,6 +6179,8 @@ static gint on_video_key_press_event(GtkWidget *widget, GdkEventKey *ev) {
 		/* DEBUG */
 		fprintf(stderr,"Keypress %X\n",ev->keyval);
 	}
+
+    return 0;
 }
 
 static gint on_video_button_press_event(GtkWidget *widget, GdkEventButton *ev) {
