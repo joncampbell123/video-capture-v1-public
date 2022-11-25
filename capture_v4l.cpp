@@ -2700,14 +2700,17 @@ int main(int argc,char **argv) {
 		/* VBI */
 		if (vbi_fd >= 0 && vbi_buffer != NULL) {
 			double framt = NOW;
-			AVFrame av_frame;
+			AVFrame *av_frame;
 			int rd,expect;
 
-			memset(&av_frame,0,sizeof(av_frame));
-			av_frame.key_frame = (avi_vbi_frame_counter % AVI_FRAMES_PER_GROUP) == 0;
-			av_frame.pts = AV_NOPTS_VALUE;
-			av_frame.width = vbi_width;
-			av_frame.height = v4l_vbi_capfmt.fmt.vbi.count[0] + v4l_vbi_capfmt.fmt.vbi.count[1];
+			av_frame = av_frame_alloc();
+			av_frame->key_frame = (avi_vbi_frame_counter % AVI_FRAMES_PER_GROUP) == 0;
+			av_frame->pts = AV_NOPTS_VALUE;
+			av_frame->width = vbi_width;
+			av_frame->height = v4l_vbi_capfmt.fmt.vbi.count[0] + v4l_vbi_capfmt.fmt.vbi.count[1];
+
+			if (fmp4_vbi_context != NULL)
+				av_frame->format = fmp4_vbi_context->pix_fmt;
 
 			assert(vbi_read_field <= 1);
 			expect = vbi_stride * v4l_vbi_capfmt.fmt.vbi.count[vbi_read_field];
@@ -2725,18 +2728,18 @@ int main(int argc,char **argv) {
 					vbi_read_field ^= 1;
 					if (!vbi_read_field && AVI && fmp4_vbi_context != NULL) {
 						/* direct conversion to the shared memory segment, convert only once */
-						av_frame.data[0] = vbi_buffer;
-						av_frame.linesize[0] = vbi_width;
+						av_frame->data[0] = vbi_buffer;
+						av_frame->linesize[0] = vbi_width;
 
 						assert((vbi_width*vbi_height) <= sizeof(fmp4_yuv));
 						memset(fmp4_yuv,128,vbi_width*vbi_height);
 
-						av_frame.data[1] = fmp4_yuv;
-						av_frame.linesize[1] = vbi_width >> 1;
-						av_frame.data[2] = fmp4_yuv;
-						av_frame.linesize[2] = vbi_width >> 1;
+						av_frame->data[1] = fmp4_yuv;
+						av_frame->linesize[1] = vbi_width >> 1;
+						av_frame->data[2] = fmp4_yuv;
+						av_frame->linesize[2] = vbi_width >> 1;
 
-						AVPacket pkt;
+						AVPacket *pkt;
 						int gotit=0;
 
 						if (framt > 0) {
@@ -2753,52 +2756,55 @@ int main(int argc,char **argv) {
 							}
 						}
 
-                        v4l_last_vbi_delta = avi_vbi_frame_counter - v4l_last_vbi;
-                        v4l_last_vbi = avi_vbi_frame_counter;
+						v4l_last_vbi_delta = avi_vbi_frame_counter - v4l_last_vbi;
+						v4l_last_vbi = avi_vbi_frame_counter;
 
 						/* encode to MPEG-4 and store */
-						memset(&pkt,0,sizeof(pkt));
-						pkt.data = fmp4_temp;
-						pkt.size = sizeof(fmp4_temp);
-						pkt.dts = avi_vbi_frame_counter;
-						pkt.pts = avi_vbi_frame_counter;
-						av_frame.pts = avi_vbi_frame_counter;
-						rd = avcodec_encode_video2(fmp4_vbi_context,&pkt,&av_frame,&gotit);
+						pkt = av_packet_alloc();
+						assert(pkt != NULL);
+						pkt->data = fmp4_temp;
+						pkt->size = sizeof(fmp4_temp);
+						pkt->dts = avi_vbi_frame_counter;
+						pkt->pts = avi_vbi_frame_counter;
+						av_frame->pts = avi_vbi_frame_counter;
+						rd = avcodec_encode_video2(fmp4_vbi_context,pkt,av_frame,&gotit);
 						if (rd < 0) {
 							printf("Unable to encode frame rd=%d\n",rd);
 						}
 						else if (gotit == 0) {
 							printf("Hm? No output on %llu? rd=%d gotit=%u\n",
-								(unsigned long long)avi_vbi_frame_counter,rd,gotit);
+									(unsigned long long)avi_vbi_frame_counter,rd,gotit);
 						}
 						else {
-							rd = pkt.size;
+							rd = pkt->size;
 							if (rd > 0) {
 								int patience = 1000;
 
-                                if (!async_io) {
-                                    while (AVI_vbi_video->sample_write_chunk < pkt.dts && patience-- > 0)
-                                        avi_writer_stream_write(AVI,AVI_vbi_video,NULL,0,0);
-                                }
+								if (!async_io) {
+									while (AVI_vbi_video->sample_write_chunk < pkt->dts && patience-- > 0)
+										avi_writer_stream_write(AVI,AVI_vbi_video,NULL,0,0);
+								}
 
-                                if (async_io) {
-                                    AVIPacket *p = new AVIPacket();
-                                    p->stream = AVI_STREAM_VBI;
-                                    p->set_data(fmp4_temp,rd);
-                                    p->set_flags((pkt.flags&AV_PKT_FLAG_KEY) ? riff_idx1_AVIOLDINDEX_flags_KEYFRAME : 0);
-                                    p->target_chunk = pkt.dts;
-                                    async_avi_queue_add(&p);
-                                }
-                                else {
-    								avi_writer_stream_write(AVI,AVI_vbi_video,fmp4_temp,rd,
-	    								(pkt.flags&AV_PKT_FLAG_KEY) ? riff_idx1_AVIOLDINDEX_flags_KEYFRAME : 0);
-                                }
+								if (async_io) {
+									AVIPacket *p = new AVIPacket();
+									p->stream = AVI_STREAM_VBI;
+									p->set_data(fmp4_temp,rd);
+									p->set_flags((pkt->flags&AV_PKT_FLAG_KEY) ? riff_idx1_AVIOLDINDEX_flags_KEYFRAME : 0);
+									p->target_chunk = pkt->dts;
+									async_avi_queue_add(&p);
+								}
+								else {
+									avi_writer_stream_write(AVI,AVI_vbi_video,fmp4_temp,rd,
+										(pkt->flags&AV_PKT_FLAG_KEY) ? riff_idx1_AVIOLDINDEX_flags_KEYFRAME : 0);
+								}
 							}
 							else {
 								printf("Hm? No output on %llu\n",avi_vbi_frame_counter);
 							}
 						}
 
+						av_packet_unref(pkt);
+						av_packet_free(&pkt);
 						avi_vbi_frame_counter++;
 					}
 				}
@@ -2814,6 +2820,10 @@ int main(int argc,char **argv) {
 			else {
 				vbi_read_field ^= 1;
 			}
+
+			av_frame_unref(av_frame);
+			av_frame_free(&av_frame);
+
 		}
 
 		/* ALSA audio */
