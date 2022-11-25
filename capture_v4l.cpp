@@ -423,6 +423,7 @@ static void close_avi_file_doit(avi_writer *avi) {
 
 static void *close_avi_file_thread(void *x) {
 	close_avi_file_doit((struct avi_writer*)x);
+	return NULL;
 }
 
 static list<pthread_t> close_threads;
@@ -2494,15 +2495,17 @@ int main(int argc,char **argv) {
 			}
 
 			if (ptr != NULL) {
-				AVFrame av_frame;
+				AVFrame *av_frame = av_frame_alloc();
 
-				memset(&av_frame,0,sizeof(av_frame));
-				av_frame.top_field_first = 1;//(v4l_interlaced == 0); FIXME!
-				av_frame.interlaced_frame = (v4l_interlaced >= 0);
-				av_frame.key_frame = (avi_frame_counter % AVI_FRAMES_PER_GROUP) == 0;
-				av_frame.pts = AV_NOPTS_VALUE;
-                av_frame.width = v4l_width;
-                av_frame.height = v4l_height;
+				av_frame->top_field_first = 1;//(v4l_interlaced == 0); FIXME!
+				av_frame->interlaced_frame = (v4l_interlaced >= 0);
+				av_frame->key_frame = (avi_frame_counter % AVI_FRAMES_PER_GROUP) == 0;
+				av_frame->pts = AV_NOPTS_VALUE;
+				av_frame->width = v4l_width;
+				av_frame->height = v4l_height;
+
+				if (fmp4_context != NULL)
+					av_frame->format = fmp4_context->pix_fmt;
 
 				if (v4l_fd >= 0 && live_shm != NULL) {
 					volatile struct live_shm_header *xx = live_shm_head();
@@ -2515,26 +2518,26 @@ int main(int argc,char **argv) {
 					assert(xx->in >= 0 && xx->in < xx->slots);
 
 					/* direct conversion to the shared memory segment, convert only once */
-					av_frame.data[0] = live_shm + sizeof(struct live_shm_header) +
+					av_frame->data[0] = live_shm + sizeof(struct live_shm_header) +
 						(xx->frame_size * xx->in);
-					av_frame.linesize[0] = v4l_width_stride;
-					av_frame.data[1] = av_frame.data[0] + (v4l_width_stride * v4l_height);
-					av_frame.linesize[1] = v4l_width_stride >> 1;
-					av_frame.data[2] = av_frame.data[1] + ((v4l_width_stride/2) * (v4l_height>>v4l_codec_yshr));
-					av_frame.linesize[2] = v4l_width_stride >> 1;
-					assert((av_frame.data[2] + (av_frame.linesize[2]*(v4l_height>>v4l_codec_yshr))) <= (live_shm + live_shm_size));
+					av_frame->linesize[0] = v4l_width_stride;
+					av_frame->data[1] = av_frame->data[0] + (v4l_width_stride * v4l_height);
+					av_frame->linesize[1] = v4l_width_stride >> 1;
+					av_frame->data[2] = av_frame->data[1] + ((v4l_width_stride/2) * (v4l_height>>v4l_codec_yshr));
+					av_frame->linesize[2] = v4l_width_stride >> 1;
+					assert((av_frame->data[2] + (av_frame->linesize[2]*(v4l_height>>v4l_codec_yshr))) <= (live_shm + live_shm_size));
 
 					if (v4l_codec_yshr == 0) {
 						if (v4l_fmt.fmt.pix.pixelformat == V4L2_PIX_FMT_YUYV)
-							copy_yuyv_to_planar_yuv_422(av_frame.data,av_frame.linesize,ptr);
+							copy_yuyv_to_planar_yuv_422(av_frame->data,av_frame->linesize,ptr);
 						else if (v4l_fmt.fmt.pix.pixelformat == V4L2_PIX_FMT_UYVY)
-							copy_uyvy_to_planar_yuv_422(av_frame.data,av_frame.linesize,ptr);
+							copy_uyvy_to_planar_yuv_422(av_frame->data,av_frame->linesize,ptr);
 					}
 					else if (v4l_codec_yshr == 1) {
 						if (v4l_fmt.fmt.pix.pixelformat == V4L2_PIX_FMT_YUYV)
-							copy_yuyv_to_planar_yuv_420(av_frame.data,av_frame.linesize,ptr);
+							copy_yuyv_to_planar_yuv_420(av_frame->data,av_frame->linesize,ptr);
 						else if (v4l_fmt.fmt.pix.pixelformat == V4L2_PIX_FMT_UYVY)
-							copy_uyvy_to_planar_yuv_420(av_frame.data,av_frame.linesize,ptr);
+							copy_uyvy_to_planar_yuv_420(av_frame->data,av_frame->linesize,ptr);
 					}
 
 					unsigned int ch=0;
@@ -2558,7 +2561,7 @@ int main(int argc,char **argv) {
 						xx->map[xx->in].audio_max_level[ch] = 0;
 						xx->map[xx->in].audio_avg_level[ch] = 0;
 					}
-					xx->map[xx->in].offset = (uint32_t)((size_t)av_frame.data[0] - (size_t)live_shm);
+					xx->map[xx->in].offset = (uint32_t)((size_t)av_frame->data[0] - (size_t)live_shm);
 					xx->map[xx->in].generation = xx->this_generation;
 					xx->map[xx->in].field_order = v4l_interlaced + 1;
 					if ((++xx->in) == xx->slots) {
@@ -2567,30 +2570,30 @@ int main(int argc,char **argv) {
 					}
 				}
 				else {
-					av_frame.data[0] = fmp4_yuv;
-					av_frame.linesize[0] = v4l_width_stride;
-					av_frame.data[1] = av_frame.data[0] + (v4l_width_stride * v4l_height);
-					av_frame.linesize[1] = v4l_width_stride >> 1;
-					av_frame.data[2] = av_frame.data[1] + ((v4l_width_stride/2) * (v4l_height>>v4l_codec_yshr));
-					av_frame.linesize[2] = v4l_width_stride >> 1;
+					av_frame->data[0] = fmp4_yuv;
+					av_frame->linesize[0] = v4l_width_stride;
+					av_frame->data[1] = av_frame->data[0] + (v4l_width_stride * v4l_height);
+					av_frame->linesize[1] = v4l_width_stride >> 1;
+					av_frame->data[2] = av_frame->data[1] + ((v4l_width_stride/2) * (v4l_height>>v4l_codec_yshr));
+					av_frame->linesize[2] = v4l_width_stride >> 1;
 
 					if (v4l_codec_yshr == 0) {
 						if (v4l_fmt.fmt.pix.pixelformat == V4L2_PIX_FMT_YUYV)
-							copy_yuyv_to_planar_yuv_422(av_frame.data,av_frame.linesize,ptr);
+							copy_yuyv_to_planar_yuv_422(av_frame->data,av_frame->linesize,ptr);
 						else if (v4l_fmt.fmt.pix.pixelformat == V4L2_PIX_FMT_UYVY)
-							copy_uyvy_to_planar_yuv_422(av_frame.data,av_frame.linesize,ptr);
+							copy_uyvy_to_planar_yuv_422(av_frame->data,av_frame->linesize,ptr);
 					}
 					else if (v4l_codec_yshr == 1) {
 						if (v4l_fmt.fmt.pix.pixelformat == V4L2_PIX_FMT_YUYV)
-							copy_yuyv_to_planar_yuv_420(av_frame.data,av_frame.linesize,ptr);
+							copy_yuyv_to_planar_yuv_420(av_frame->data,av_frame->linesize,ptr);
 						else if (v4l_fmt.fmt.pix.pixelformat == V4L2_PIX_FMT_UYVY)
-							copy_uyvy_to_planar_yuv_420(av_frame.data,av_frame.linesize,ptr);
+							copy_uyvy_to_planar_yuv_420(av_frame->data,av_frame->linesize,ptr);
 					}
 				}
 
 				if (AVI) {
 					if (AVI_video) {
-						AVPacket pkt;
+						AVPacket *pkt;
 						int gotit=0;
 
 						if (framt > 0) {
@@ -2607,17 +2610,18 @@ int main(int argc,char **argv) {
 							}
 						}
 
-                        v4l_last_frame_delta = avi_frame_counter - v4l_last_frame;
-                        v4l_last_frame = avi_frame_counter;
+						v4l_last_frame_delta = avi_frame_counter - v4l_last_frame;
+						v4l_last_frame = avi_frame_counter;
 
 						/* encode to MPEG-4 and store */
-						memset(&pkt,0,sizeof(pkt));
-						pkt.data = fmp4_temp;
-						pkt.size = sizeof(fmp4_temp);
-						pkt.dts = avi_frame_counter;
-						pkt.pts = avi_frame_counter;
-						av_frame.pts = avi_frame_counter;
-						rd = avcodec_encode_video2(fmp4_context,&pkt,&av_frame,&gotit);
+						pkt = av_packet_alloc(); /* FFMPEG 4.4 no longer likes AVPacket allocated on stack */
+						assert(pkt != NULL);
+						pkt->data = fmp4_temp;
+						pkt->size = sizeof(fmp4_temp);
+						pkt->dts = avi_frame_counter;
+						pkt->pts = avi_frame_counter;
+						av_frame->pts = avi_frame_counter;
+						rd = avcodec_encode_video2(fmp4_context,pkt,av_frame,&gotit);
 						if (rd < 0) {
 							printf("Unable to encode frame rd=%d\n",rd);
 						}
@@ -2626,58 +2630,60 @@ int main(int argc,char **argv) {
 								(unsigned long long)avi_frame_counter,rd,gotit);
 						}
 						else {
-							rd = pkt.size;
+							rd = pkt->size;
 							if (rd > 0) {
 								int patience = 1000;
 
-                                if (!async_io) {
-                                    while (AVI_video->sample_write_chunk < pkt.dts && patience-- > 0)
-                                        avi_writer_stream_write(AVI,AVI_video,NULL,0,0);
-                                }
+								if (!async_io) {
+									while (AVI_video->sample_write_chunk < pkt->dts && patience-- > 0)
+										avi_writer_stream_write(AVI,AVI_video,NULL,0,0);
+								}
 
-                                if (async_io) {
-                                    AVIPacket *p = new AVIPacket();
-                                    p->stream = AVI_STREAM_VIDEO;
-                                    p->set_data(fmp4_temp,rd);
-                                    p->set_flags((pkt.flags&AV_PKT_FLAG_KEY) ? riff_idx1_AVIOLDINDEX_flags_KEYFRAME : 0);
-                                    p->target_chunk = pkt.dts;
-                                    async_avi_queue_add(&p);
-                                }
-                                else {
-    								if (avi_writer_stream_write(AVI,AVI_video,fmp4_temp,rd,
-	    								(pkt.flags&AV_PKT_FLAG_KEY) ? riff_idx1_AVIOLDINDEX_flags_KEYFRAME : 0)) {
-		    							avi_writer_stream_index *si = AVI_video->sample_index + AVI_video->sample_write_chunk - 1;
-			    						socket_index_msg("V",pkt.dts,si->offset,si->length,(pkt.flags&AV_PKT_FLAG_KEY)?1:0);
-				    				}
-                                }
+								if (async_io) {
+									AVIPacket *p = new AVIPacket();
+									p->stream = AVI_STREAM_VIDEO;
+									p->set_data(fmp4_temp,rd);
+									p->set_flags((pkt->flags&AV_PKT_FLAG_KEY) ? riff_idx1_AVIOLDINDEX_flags_KEYFRAME : 0);
+									p->target_chunk = pkt->dts;
+									async_avi_queue_add(&p);
+								}
+								else {
+									if (avi_writer_stream_write(AVI,AVI_video,fmp4_temp,rd,
+										(pkt->flags&AV_PKT_FLAG_KEY) ? riff_idx1_AVIOLDINDEX_flags_KEYFRAME : 0)) {
+										avi_writer_stream_index *si = AVI_video->sample_index + AVI_video->sample_write_chunk - 1;
+										socket_index_msg("V",pkt->dts,si->offset,si->length,(pkt->flags&AV_PKT_FLAG_KEY)?1:0);
+									}
+								}
 							}
 							else {
 								printf("Hm? No output on %llu\n",avi_frame_counter);
 							}
 						}
 
+						av_packet_unref(pkt);
+						av_packet_free(&pkt);
 						avi_frame_counter++;
 					}
 				}
 
-                if (async_io && AVI != NULL && AVI_video != NULL) {
-                    async_avi_queue_lock();
+				if (async_io && AVI != NULL && AVI_video != NULL) {
+					async_avi_queue_lock();
 
-                    while (v4l_video_async_track < AVI_video->sample_write_chunk) {
-                        avi_writer_stream_index *si = AVI_video->sample_index + v4l_video_async_track;
+					while (v4l_video_async_track < AVI_video->sample_write_chunk) {
+						avi_writer_stream_index *si = AVI_video->sample_index + v4l_video_async_track;
 
-                        if (si->length != 0 || (si->dwFlags & AV_PKT_FLAG_KEY) != 0) {
-                            socket_index_msg("V",v4l_video_async_track,si->offset,si->length,(si->dwFlags&riff_idx1_AVIOLDINDEX_flags_KEYFRAME)?1:0);
-                            v4l_video_async_track++;
-                            break;
-                        }
-                        else {
-                            v4l_video_async_track++;
-                        }
-                    }
+						if (si->length != 0 || (si->dwFlags & AV_PKT_FLAG_KEY) != 0) {
+							socket_index_msg("V",v4l_video_async_track,si->offset,si->length,(si->dwFlags&riff_idx1_AVIOLDINDEX_flags_KEYFRAME)?1:0);
+							v4l_video_async_track++;
+							break;
+						}
+						else {
+							v4l_video_async_track++;
+						}
+					}
 
-                    async_avi_queue_unlock();
-                }
+					async_avi_queue_unlock();
+				}
 
 				vb->timestamp.tv_sec = 0;
 				vb->timestamp.tv_usec = 0;
@@ -2685,6 +2691,9 @@ int main(int argc,char **argv) {
 					if (++v4l_bufptr >= v4l_buffers)
 						v4l_bufptr = 0;
 				}
+
+				av_frame_unref(av_frame);
+				av_frame_free(&av_frame);
 			}
 		}
 
