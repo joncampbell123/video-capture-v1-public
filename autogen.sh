@@ -33,7 +33,7 @@ check aclocal || exit 1
 check autoheader || exit 1
 check automake || exit 1
 check autoconf || exit 1
-check python || exit 1
+#check python || exit 1
 check pkg-config || exit 1
 check yasm || exit 1 # WE don't need this, but FFMPEG does
 check m4 || exit 1

@@ -532,10 +532,18 @@ static void open_avi_file() {
 	}
 	avcodec_get_context_defaults3(fmp4_context,fmp4_codec);
 
-	if (v4l_codec_yshr == 0)
-		fmp4_context->bit_rate = 12000000;
-	else
-		fmp4_context->bit_rate = 8000000;
+	if (v4l_height >= 720) {
+		if (v4l_codec_yshr == 0)
+			fmp4_context->bit_rate = 25000000;
+		else
+			fmp4_context->bit_rate = 20000000;
+	}
+	else {
+		if (v4l_codec_yshr == 0)
+			fmp4_context->bit_rate = 8000000;
+		else
+			fmp4_context->bit_rate = 12000000;
+	}
 
 	fmp4_context->keyint_min = AVI_FRAMES_PER_GROUP;
 	fmp4_context->time_base.num = v4l_framerate_d; /* NTS: ffmpeg means time interval as "amount of time between frames" */
@@ -584,7 +592,10 @@ static void open_avi_file() {
 	else
 		av_dict_set(&opt_dict,"profile","main",0);
 
-	av_dict_set(&opt_dict,"preset","veryfast",0);
+	av_dict_set(&opt_dict,"preset","ultrafast",0);
+	av_dict_set(&opt_dict,"x264-params","trellis=0:scenecut=0:mixed-refs=0:me=dia:subme=0:aq-mode=0:b-adapt=0:deblock=1:rc-lookahead=0:ref=0:weightb=0:weightp=0",0);
+	av_dict_set(&opt_dict,"coder","vlc",0);
+	av_dict_set(&opt_dict,"mbtree","1",0);
 	av_dict_set(&opt_dict,"vbr","1",0);
 
 	if (avcodec_open2(fmp4_context,fmp4_codec,&opt_dict)) {
