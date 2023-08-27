@@ -3571,8 +3571,8 @@ InputManager::InputManager(int input_index) {
 	enable_vbi = false;
 	audio_device.clear();
 	video_index = -1;
-	source_ar_n = 4;
-	source_ar_d = 3;
+	source_ar_n = 16;
+	source_ar_d = 9;
 	cap_pid = -1;
 	socket_path = "";
 	socket_svr_fd = -1;
