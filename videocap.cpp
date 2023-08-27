@@ -767,8 +767,7 @@ bool InputManager::load_external_avi_for_play(const char *path) {
 			/* guess the aspect ratio */
 			{
 				double ar = (double)vt_play.video_width / vt_play.video_height;
-				fprintf(stderr,"ar=%.3f\n",ar);
-				if (ar > 1.4) {
+				if (ar > 1.4 || vt_play.video_height >= 720) {
 					source_ar_n = 16;
 					source_ar_d = 9;
 				}
@@ -2182,6 +2181,25 @@ bool put_live_frame_on_screen(InputManager *input,bool force_redraw/*TODO*/) {
 	generation = xx->map[input->shmem_out].generation;
 	if (++input->shmem_out >= input->shmem_slots)
 		input->shmem_out = 0;
+
+	if (width > 0 && height > 0) {
+		const int p_ar_n = input->source_ar_n;
+		const int p_ar_d = input->source_ar_d;
+		double ar = (double)width / height;
+		if (ar > 1.4 || height >= 720) {
+			input->source_ar_n = 16;
+			input->source_ar_d = 9;
+		}
+		else {
+			input->source_ar_n = 4;
+			input->source_ar_d = 3;
+		}
+
+		if (p_ar_n != input->source_ar_n || p_ar_d != input->source_ar_d) {
+			client_area_get_aspect_from_current_input();
+			client_area_update_rects_again();
+		}
+	}
 
 	if (xx->color_fmt == LIVE_COLOR_FMT_YUV422)
 		yshr = 0;
