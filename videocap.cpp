@@ -779,6 +779,7 @@ bool InputManager::load_external_avi_for_play(const char *path) {
 
 			client_area_get_aspect_from_current_input();
 			client_area_update_rects_again();
+			client_area_draw_overlay_borders();
 
 			/* encourage the player to start from the beginning.
 			 * If this is the file input source, this should cause the
@@ -2198,6 +2199,7 @@ bool put_live_frame_on_screen(InputManager *input,bool force_redraw/*TODO*/) {
 		if (p_ar_n != input->source_ar_n || p_ar_d != input->source_ar_d) {
 			client_area_get_aspect_from_current_input();
 			client_area_update_rects_again();
+			client_area_draw_overlay_borders();
 		}
 	}
 
@@ -3091,6 +3093,7 @@ void switch_input(int x) {
 		if (pthread_mutex_lock(&global_mutex) == 0) {
 			client_area_get_aspect_from_current_input();
 			client_area_update_rects_again();
+			client_area_draw_overlay_borders();
 			if (video_should_redraw_t < 0)
 				video_should_redraw_t = NOW + 0.25;
 
@@ -3867,6 +3870,7 @@ static void on_main_window_view_aspect_ratio_select(GtkMenuItem *menuitem,gpoint
 		CurrentInputObj()->user_ar_d = ard;
 		client_area_get_aspect_from_current_input();
 		client_area_update_rects_again();
+		client_area_draw_overlay_borders();
 		if (!client_area_xvideo) {
 			if (!do_video_source(CurrentInputObj(),true)) {
 				generate_non_video_frame();
