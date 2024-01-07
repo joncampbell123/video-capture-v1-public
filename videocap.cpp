@@ -50,13 +50,6 @@
 #define UINT64_C(x) (x##LL)
 #endif
 
-extern "C" {
-#include <libavutil/pixfmt.h>
-#include <libavcodec/avcodec.h>
-}
-
-#include "avi_reader.h"
-#include "avi_writer.h"
 #include "live_feed.h"
 #include "vgafont.h"
 #include "now.h"
@@ -103,14 +96,14 @@ static const metadata_list_entry metadata_stock[] = {
 /* view input mode */
 enum {
 	VIEW_INPUT_OFF=0,		/* no display */
-	VIEW_INPUT_FILE,		/* show file (selected File -> Open) */
 	VIEW_INPUT_1,			/* capture device 1 */
 	VIEW_INPUT_2,			/* capture device 2 */
 	VIEW_INPUT_3,			/* capture device 3 */
 	VIEW_INPUT_4,			/* capture device 4 */
 	VIEW_INPUT_5,			/* capture device 5 */
 	VIEW_INPUT_6,			/* capture device 6 */
-	VIEW_INPUT_IP,			/* IP input */
+	VIEW_INPUT_7,			/* capture device 7 */
+	VIEW_INPUT_8,			/* capture device 8 */
 	VIEW_INPUT_MAX			/* -------------------- */
 };
 
@@ -129,10 +122,8 @@ public:
 		start_time = -1;
 		video_rate_n = video_rate_d = 0;
 		video_width = video_height = 0;
-		video_current_frame = -1LL;
 		video_first_frame = -1LL;
 		video_total_frames = 0;
-		video_index.clear();
 	}
 public:
 	struct index_entry {
@@ -146,10 +137,8 @@ public:
 	double				start_time;
 	int				video_rate_n,video_rate_d;
 	int				video_width,video_height;
-	signed long long		video_current_frame;	/* NOTE: This is the last decoded frame or -1LL if none. The next decode step will SKIP this frame and step forward */
 	signed long long		video_total_frames;
 	signed long long		video_first_frame;
-	vector<struct index_entry>	video_index;
 };
 
 struct uint_ratio_t {
@@ -171,15 +160,7 @@ public:
 	void onActivate(bool on);
 	void start_recording();
 	void stop_recording();
-	void start_playback();
-	void pause_playback();
-	void stop_playback();
-	void single_step(int frames=1);	/* frames > 0, step forward. frames < 0, step backwards */
 	void socket_command(const char *msg);
-	signed long long time_to_target_frame_clipped();
-	signed long long time_to_target_frame();
-	bool load_external_avi_for_play(const char *path);
-	void ChangeSpeed(int n,unsigned int d);
 	void increase_speed();
 	void decrease_speed();
 	bool start_process();
@@ -187,9 +168,6 @@ public:
 	void shutdown_process();
 	void close_socket();
 	void close_shmem();
-	void close_avcodec();
-	void close_capture_avi();
-	void close_play_avi();
 	void codec_check();
 	bool idle_socket();
 	void idle();
@@ -208,8 +186,8 @@ public:
 	int				user_ar_n,user_ar_d;
 	int				source_ar_n,source_ar_d;
 
-    /* zebra marking */
-    int             zebra;
+	/* zebra marking */
+	int				zebra;
 
 	/* capture process */
 	int				cap_pid;			/* PID of the process */
@@ -240,18 +218,15 @@ public:
 	bool				crop_bounds;
 	bool				crop_defrect;
 	bool				swap_fields;
-    bool                jpeg_yuv;
-    bool                async_io;
+	bool				jpeg_yuv;
+	bool				async_io;
 	int				crop_left,crop_top,crop_width,crop_height;
-    double              capture_fps;
+	double				capture_fps;
 	std::string			input_codec;
 	std::string			vcrhack;
 
 	/* video capture info */
-	video_tracking			vt_play,vt_rec;			/* independent indexes for playback and recording */
-	int				capture_avi_fd;
-	int				play_avi_fd;
-	bool				play_is_rec;			/* capture_avi == play_avi (optimize out string compare) */
+	video_tracking			vt_rec;			/* independent indexes for playback and recording */
 
 	/* prefix added to file name */
 	char				file_prefix[128];
@@ -260,7 +235,6 @@ public:
 
 	/* the AVI file the capture program is writing */
 	string				capture_avi;
-	string				play_avi;
 
 	/* temporary buffer for messages from client */
 	char				sock_msg_tmp[8192];
@@ -271,10 +245,6 @@ public:
 	/* playback speed control (as integer ratios) */
 	int				playback_speed_n;
 	unsigned int			playback_speed_d;
-
-	/* codec */
-	AVCodecContext*			video_avcodec_ctx;
-	AVCodec*			video_avcodec;
 };
 
 void update_ui();
@@ -417,9 +387,6 @@ GtkRadioAction*			main_window_view_aspect_action = NULL;
 GtkWidget*			main_window_view_input_none = NULL;
 GtkWidget*			main_window_toolbar_input_none = NULL;
 
-GtkWidget*			main_window_view_input_file = NULL;
-GtkWidget*			main_window_toolbar_input_file = NULL;
-
 GtkWidget*			main_window_view_input_1 = NULL;
 GtkWidget*			main_window_toolbar_input_1 = NULL;
 
@@ -438,8 +405,11 @@ GtkWidget*			main_window_toolbar_input_5 = NULL;
 GtkWidget*			main_window_view_input_6 = NULL;
 GtkWidget*			main_window_toolbar_input_6 = NULL;
 
-GtkWidget*			main_window_view_input_ip = NULL;
-GtkWidget*			main_window_toolbar_input_ip = NULL;
+GtkWidget*			main_window_view_input_7 = NULL;
+GtkWidget*			main_window_toolbar_input_7 = NULL;
+
+GtkWidget*			main_window_view_input_8 = NULL;
+GtkWidget*			main_window_toolbar_input_8 = NULL;
 
 GtkWidget*			main_window_view_osd = NULL;
 
@@ -475,326 +445,10 @@ void chomp(char *s) {
 	while (e >= s && (*e == '\r' || *e == '\n')) *e-- = 0;
 }
 
-void InputManager::increase_speed() {
-	double curspeed = fabs((double)playback_speed_n) / playback_speed_d;
-	double est;
-	int nrev=1;
-	int i=0;
-
-	if (playback_speed_n < 0) {
-		nrev = -1;
-		for (i=user_speeds_total-1;i >= 0;) {
-			est = (double)user_speeds[i].m / user_speeds[i].n;
-			if (est < curspeed) break;
-			i--;
-		}
-
-		if (i < 0) {
-			nrev = 1;
-			i = 0;
-		}
-	}
-	else if (playback_speed_n > 0) {
-		nrev = 1;
-		for (i=0;i < (user_speeds_total-1);) {
-			est = (double)user_speeds[i].m / user_speeds[i].n;
-			if (est > curspeed) break;
-			i++;
-		}
-	}
-
-	ChangeSpeed((int)user_speeds[i].m*nrev,user_speeds[i].n);
-}
-
-void InputManager::decrease_speed() {
-	double curspeed = fabs((double)playback_speed_n) / playback_speed_d;
-	double est;
-	int nrev=1;
-	int i=0;
-
-	if (playback_speed_n > 0) {
-		nrev = 1;
-		for (i=user_speeds_total-1;i >= 0;) {
-			est = (double)user_speeds[i].m / user_speeds[i].n;
-			if (est < curspeed) break;
-			i--;
-		}
-
-		if (i < 0) {
-			nrev = -1;
-			i = 0;
-		}
-	}
-	else if (playback_speed_n < 0) {
-		nrev = -1;
-		for (i=0;i < (user_speeds_total-1);) {
-			est = (double)user_speeds[i].m / user_speeds[i].n;
-			if (est > curspeed) break;
-			i++;
-		}
-	}
-
-	ChangeSpeed((int)user_speeds[i].m*nrev,user_speeds[i].n);
-}
-
 int how_many_cpus() {
 	int number_of_cpus = sysconf(_SC_NPROCESSORS_ONLN);
 	if (number_of_cpus < 1) number_of_cpus = 1;
 	return number_of_cpus;
-}
-
-bool InputManager::load_external_avi_for_play(const char *path) {
-	bool result = false;
-	struct stat st;
-	size_t i;
-
-	if (play_avi != "" && play_avi == path)
-		return true;
-
-	close_play_avi();
-	play_avi = "";
-	vt_play.clear();
-	play_is_rec = false;
-
-	if (*path == 0) /* a.k.a path == "" or strlen(path) == 0 */
-		return false;
-
-	if (capture_avi != "" && play_avi == capture_avi) {
-		fprintf(stderr,"Not reopening file '%s', this input is already capturing that file\n",path);
-		play_is_rec = true;
-		return true;
-	}
-
-	/* try to catch any attempt to open an AVI already opened (or recording) on other inputs.
-	 * if we see that, then switch to the other input and return false */
-	for (i=VIEW_INPUT_OFF+1;i < VIEW_INPUT_MAX;i++) {
-		InputManager *im = Input[i];
-		if (im->play_avi == path || im->capture_avi == path) {
-			fprintf(stderr,"File '%s' is already in use on input '%s'\n",path,im->osd_name);
-			switch_input(i);
-			update_ui();
-
-			/* then, direct that input to play the file from the beginning */
-			im->stop_playback();
-			/* TODO: Some mechanism to direct the live recording to play from the start */
-			im->pause_playback();
-			return false;
-		}
-	}
-
-	if (stat(path,&st)) {
-		fprintf(stderr,"Cannot stat AVI file '%s', '%s'\n",path,strerror(errno));
-		return false;
-	}
-
-	/* good. now open the AVI and read in the index */
-	assert(play_avi_fd < 0);
-	fprintf(stderr,"Loading and opening '%s'\n",path);
-	play_avi_fd = open(path,O_RDONLY);
-	if (play_avi_fd < 0) {
-		fprintf(stderr,"Unable to open AVI file '%s', '%s'\n",path,strerror(errno));
-		return false;
-	}
-
-	/* if the AVI was recorded by us, the filename should take the form <prefix>-<unix-timecode>.avi.
-	 * if that's true, we can figure out the time recording started */
-	/* TODO: do this */
-
-	avi_reader *avi = avi_reader_create();
-	if (avi == NULL) {
-		close_play_avi();
-		fprintf(stderr,"Cannot create AVI reader\n");
-		return false;
-	}
-	avi_reader_fd(avi,play_avi_fd);
-	if (avi_reader_scan(avi)) {
-		unsigned char vstrf_data[6000];
-		int v_ffmpeg_codec_id = -1;
-		int video_stream = -1;
-
-		/* AVI is OK. read in the OpenDML index, or if that's not available, the older-format index */
-		avi_reader_scan_odml_index(avi);
-		avi_reader_scan_index1(avi);
-
-		/* we REQUIRE the index */
-		if (avi_reader_has_an_index(avi)) {
-			/* now locate the video stream */
-			/* TODO: if requested by Radeus labs, locate an audio stream too */
-			for (i=0;i < avi->avi_streams;i++) {
-				avi_reader_stream *s = &avi->avi_stream[i];
-
-				fprintf(stderr,"Trying %u\n",i);
-				if (s->strh.fccType == avi_fccType_video && s->strf_chunk.data_length < 6000 && s->strf_chunk.absolute_data_offset != 0ULL &&
-					s->strh.dwRate != 0 && s->strh.dwScale != 0 && video_stream < 0) {
-					/* is this a video stream that I know how to handle? */
-					/* determine this by reading the 'strf' chunk for this stream */
-					/* TODO: Support for codecs other than DIVX/MPEG-4 */
-					/* TODO: Include flags to indicate whether the BITMAPINFO struct has extra data that FFMPEG needs to decode the stream */
-					if (lseek(play_avi_fd,s->strf_chunk.absolute_data_offset,SEEK_SET) == s->strf_chunk.absolute_data_offset &&
-						read(play_avi_fd,vstrf_data,s->strf_chunk.data_length) == s->strf_chunk.data_length) {
-						windows_BITMAPINFOHEADER *bmp = (windows_BITMAPINFOHEADER*)vstrf_data;
-						if (bmp->biCompression == avi_fourcc_const('D','I','V','X') ||
-							bmp->biCompression == avi_fourcc_const('F','M','P','4') ||
-							bmp->biCompression == avi_fourcc_const('X','V','I','D')) {
-							v_ffmpeg_codec_id = AV_CODEC_ID_MPEG4;
-							fprintf(stderr,"MPEG-4 video stream index %u %u x %u found\n",
-								i,bmp->biWidth,bmp->biHeight);
-							video_stream = i;
-						}
-						else if (bmp->biCompression == avi_fourcc_const('d','i','v','4') ||
-							bmp->biCompression == avi_fourcc_const('D','I','V','3')) {
-							v_ffmpeg_codec_id = AV_CODEC_ID_MSMPEG4V3;
-							fprintf(stderr,"DivX/MS-MPEG-4 video stream index %u %u x %u found\n",
-								i,bmp->biWidth,bmp->biHeight);
-							video_stream = i;
-						}
-						else if (bmp->biCompression == avi_fourcc_const('H','2','6','4')) {
-							v_ffmpeg_codec_id = AV_CODEC_ID_H264;
-							fprintf(stderr,"H.264 video stream index %u %u x %u found\n",
-								i,bmp->biWidth,bmp->biHeight);
-							video_stream = i;
-						}
-						else if (bmp->biCompression == avi_fourcc_const('F','L','V','1')) {
-							v_ffmpeg_codec_id = AV_CODEC_ID_FLV1;
-							fprintf(stderr,"DivX/MS-MPEG-4 video stream index %u %u x %u found\n",
-								i,bmp->biWidth,bmp->biHeight);
-							video_stream = i;
-						}
-					}
-				}
-			}
-		}
-		else {
-			fprintf(stderr,"AVI file has no index, cannot use.\n");
-			fprintf(stderr,"If you need the AVI file to work with this program consider using an AVI index repair utility.\n");
-		}
-
-		if (video_stream >= 0) {
-			windows_BITMAPINFOHEADER *bmp = (windows_BITMAPINFOHEADER*)vstrf_data;
-			avi_reader_stream *stream = &avi->avi_stream[video_stream];
-			struct video_tracking::index_entry ie;
-
-			/* NTS: Don't forget in Microsoft-land bitmaps are by default upside-down (bottom to top scanline order)
-			 *      but only for uncompressed bitmaps, which can be top-to-bottom if the height value is negative.
-			 *      Their SDKs also mention a right-to-left pixel order if the width is negative.
-			 *      It's just safest to take the absolute value and be done with it */
-			vt_play.video_width = abs((int)bmp->biWidth);
-			vt_play.video_height = abs((int)bmp->biHeight);
-			vt_play.video_rate_n = stream->strh.dwRate;
-			vt_play.video_rate_d = stream->strh.dwScale;
-			vt_play.video_total_frames = stream->strh.dwLength;
-			/* NTS: OpenDML files write dwTotalFrames based on the "legacy" portion below 1/2GB not the actual frame count.
-			 *      Get the true framecount from the index. */
-			/* TODO: OpenDML AVI files also carry a 'odml:dmlh' chunk where by standard the correct length is written---read that */
-			if (avi->avi_stream_odml_index != NULL) {
-				if (vt_play.video_total_frames < avi->avi_stream_odml_index[video_stream].count)
-					vt_play.video_total_frames = avi->avi_stream_odml_index[video_stream].count;
-			}
-			else if (avi->avi_stream_index1 != NULL) {
-				if (vt_play.video_total_frames < avi->avi_stream_index1[video_stream].count)
-					vt_play.video_total_frames = avi->avi_stream_index1[video_stream].count;
-			}
-
-			close_avcodec();
-			video_avcodec = avcodec_find_decoder((AVCodecID)v_ffmpeg_codec_id);
-			if (video_avcodec != NULL) {
-				video_avcodec_ctx = avcodec_alloc_context3(video_avcodec);
-				if (video_avcodec_ctx != NULL) {
-					avcodec_get_context_defaults3(video_avcodec_ctx,video_avcodec);
-					/* NTS: Some codecs (like Microsoft MPEG-4) need the width & height from the stream format */
-					video_avcodec_ctx->width = vt_play.video_width;
-					video_avcodec_ctx->height = vt_play.video_height;
-					video_avcodec_ctx->thread_count = 1;//how_many_cpus();
-					video_avcodec_ctx->thread_type = 0;//FF_THREAD_SLICE;
-					/* NTS: do NOT set FF_THREAD_FRAME because this code cannot handle it,
-					 *      it causes FFMPEG to buffer frames according to the number of threads,
-					 *      and delay them that much, when this code assumes that there is
-					 *      no delay. This code should be updated to properly handle delayed frames,
-					 *      so that eventually we can capture with B-frames and still allow
-					 *      random access. */
-//					video_avcodec_ctx->thread_type |= FF_THREAD_FRAME;
-					video_avcodec_ctx->flags2 |= AV_CODEC_FLAG2_FAST;
-					if (avcodec_open2(video_avcodec_ctx,video_avcodec,NULL)) {
-						fprintf(stderr,"Failed to open codec\n");
-						av_free(video_avcodec_ctx);
-						video_avcodec_ctx = NULL;
-						video_avcodec = NULL;
-					}
-					else {
-						fprintf(stderr,"Video codec for AVI opened\n");
-					}
-				}
-				else {
-					fprintf(stderr,"Cannot alloc ffmpeg context\n");
-				}
-			}
-			else {
-				fprintf(stderr,"FFMPEG could not locate the decoder\n");
-			}
-
-			/* copy the index into memory */
-			if (avi->avi_stream_odml_index != NULL && avi->avi_stream_odml_index[video_stream].count != 0) {
-				avi_reader_stream_odml_index *idx = &avi->avi_stream_odml_index[video_stream];
-				for (i=0;i < idx->count;i++) {
-					ie.keyframe = AVI_ODML_INDX_NONKEY(idx->map[i].size)?0:1; /* OpenDML indexes use the 31st bit to signal "keyframe" */
-					ie.offset = idx->map[i].offset;
-					ie.size = AVI_ODML_INDX_SIZE(idx->map[i].size);
-					vt_play.video_index.push_back(ie);
-				}
-			}
-			else if (avi->avi_stream_index1 != NULL && avi->avi_stream_index1[video_stream].count != 0) {
-				avi_reader_stream_index1 *idx = &avi->avi_stream_index1[video_stream];
-				for (i=0;i < idx->count;i++) {
-					/* TODO: This code might pay attention to dwFlags & NOTIME, though such AVIs are rare */
-					ie.keyframe = (idx->map[i].dwFlags & riff_idx1_AVIOLDINDEX_flags_KEYFRAME)?1:0;
-					ie.offset = idx->map[i].dwOffset;
-					ie.size = idx->map[i].dwSize;
-					vt_play.video_index.push_back(ie);
-				}
-			}
-			else {
-				fprintf(stderr,"BUG: Despite checks, neither index was loaded\n");
-			}
-
-			/* the main loop demands we know where the first keyframe lies */
-			for (i=0;i < vt_play.video_index.size() && !vt_play.video_index[i].keyframe;) i++;
-			vt_play.video_first_frame = i;
-
-			result = true;
-			play_avi = path;
-			vt_play.video_total_frames = vt_play.video_index.size();
-
-			/* guess the aspect ratio */
-			{
-				double ar = (double)vt_play.video_width / vt_play.video_height;
-				if (ar > 1.4 || vt_play.video_height >= 720) {
-					source_ar_n = 16;
-					source_ar_d = 9;
-				}
-				else {
-					source_ar_n = 4;
-					source_ar_d = 3;
-				}
-			}
-
-			client_area_get_aspect_from_current_input();
-			client_area_update_rects_again();
-			client_area_draw_overlay_borders();
-
-			/* encourage the player to start from the beginning.
-			 * If this is the file input source, this should cause the
-			 * do_video() routine to preroll the first frame onto the screen */
-			playback_base_frame = 0LL;
-			playback_base_time = NOW;
-		}
-		else {
-			fprintf(stderr,"No appropriate video stream found\n");
-		}
-	}
-
-	/* success or failure, we're done parsing the AVI */
-	avi_reader_destroy(avi);
-	return result;
 }
 
 bool load_config_parse_boolean(const char *v) {
@@ -1113,20 +767,11 @@ int init_inputs() {
 			return 1;
 		}
 
-		if (i >= VIEW_INPUT_1 && i <= VIEW_INPUT_6) {
+		if (i >= VIEW_INPUT_1 && i <= VIEW_INPUT_8) {
 			Input[i]->video_index = i - VIEW_INPUT_1;
 			sprintf(Input[i]->file_prefix,"input%d-",i-VIEW_INPUT_1+1);
 			sprintf(Input[i]->osd_name,"Video #%d",i-VIEW_INPUT_1+1);
 			sprintf(Input[i]->cfg_name,"input%d",i-VIEW_INPUT_1+1);
-		}
-		else if (i == VIEW_INPUT_FILE) {
-			sprintf(Input[i]->osd_name,"File");
-			sprintf(Input[i]->cfg_name,"file");
-		}
-		else if (i == VIEW_INPUT_IP) {
-			sprintf(Input[i]->file_prefix,"ip-%d-",1);
-			sprintf(Input[i]->osd_name,"IP");
-			sprintf(Input[i]->cfg_name,"ip%d",1);
 		}
 	}
 
@@ -1143,40 +788,11 @@ void gtk_toggle_tool_button_set_active_notoggle (GtkToggleToolButton *x, bool st
 		gtk_toggle_tool_button_set_active(x,st?1:0);
 }
 
-void InputManager::ChangeSpeed(int n,unsigned int d) {
-	assert(n != 0);
-	assert(d != 0);
-	update_now_time();
-	playback_base_frame = time_to_target_frame_clipped();
-	playback_base_time = NOW;
-	playback_speed_n = n;
-	playback_speed_d = d;
-}
-
-signed long long InputManager::time_to_target_frame() {
-	video_tracking *trk = (play_is_rec ? &vt_rec : &vt_play);
-	if ((Playing && Paused) || !Playing) return playback_base_frame;
-	signed long long target_frame = ((signed long long)
-		(((NOW - playback_base_time) * trk->video_rate_n) / trk->video_rate_d));
-	target_frame = (target_frame * (signed long long)playback_speed_n) / (signed long long)playback_speed_d;
-	target_frame += playback_base_frame;
-	return target_frame;
-}
-
-signed long long InputManager::time_to_target_frame_clipped() {
-	video_tracking *trk = (play_is_rec ? &vt_rec : &vt_play);
-	signed long long target_frame = time_to_target_frame();
-	if (target_frame > trk->video_total_frames) target_frame = trk->video_total_frames;
-	if (target_frame > trk->video_index.size()) target_frame = trk->video_index.size();
-	if (target_frame < 0LL) target_frame = 0LL;
-	return target_frame;
-}
-
 /* take internal state and apply to Play/Pause/Record UI elements */
 void update_ui_controls() {
-	/* User cannot use Record button in "No Input" and "File playback" modes */
-	gtk_widget_set_sensitive(GTK_WIDGET(main_window_toolbar_record), CurrentInput > VIEW_INPUT_FILE);
-	gtk_widget_set_sensitive(GTK_WIDGET(main_window_control_record), CurrentInput > VIEW_INPUT_FILE);
+	/* User cannot use Record button in "No Input" */
+	gtk_widget_set_sensitive(GTK_WIDGET(main_window_toolbar_record), CurrentInput > VIEW_INPUT_OFF);
+	gtk_widget_set_sensitive(GTK_WIDGET(main_window_control_record), CurrentInput > VIEW_INPUT_OFF);
 
 	/* User cannot use play/pause/stop in "No Input" */
 	gtk_widget_set_sensitive(GTK_WIDGET(main_window_toolbar_play), CurrentInput > VIEW_INPUT_OFF);
@@ -1283,35 +899,6 @@ void ui_notification(GtkMessageType typ,const char *text,...) {
 	va_end(va);
 }
 
-static void on_file_capture_open(GtkAction *action, void *p)
-{
-	GtkFileFilter *filter = gtk_file_filter_new();
-	GtkWidget *dialog = gtk_file_chooser_dialog_new("Select capture file",
-		GTK_WINDOW(main_window),GTK_FILE_CHOOSER_ACTION_OPEN,
-		GTK_STOCK_CANCEL,GTK_RESPONSE_CANCEL,
-		GTK_STOCK_OPEN,GTK_RESPONSE_ACCEPT,
-		NULL);
-
-	gtk_file_filter_add_pattern(filter, "*.avi");
-	gtk_file_filter_add_pattern(filter, "*.ts");
-	gtk_file_chooser_set_filter(GTK_FILE_CHOOSER(dialog), filter); /* CONFIRM: This takes ownership of the filter, we don't have to free it. Right? */
-
-	if (gtk_dialog_run(GTK_DIALOG(dialog)) == GTK_RESPONSE_ACCEPT) {
-		/* NOTE: load_external_avi_for_play() may call switch_input() if it sees that AVI already in use */
-		bool switchtofile = (CurrentInput != VIEW_INPUT_FILE);
-		char *filename = gtk_file_chooser_get_filename(GTK_FILE_CHOOSER(dialog));
-		Input[VIEW_INPUT_FILE]->load_external_avi_for_play(filename);
-		g_free(filename);
-
-		if (switchtofile) {
-			switch_input(VIEW_INPUT_FILE);
-			update_ui();
-		}
-	}
-
-	gtk_widget_destroy(dialog);
-}
-
 static void on_not_yet_implemented(GtkAction *action, void *p)
 {
 	ui_notification(GTK_MESSAGE_WARNING, "Command not yet implemented");
@@ -1325,7 +912,7 @@ void InputManager::start_recording() {
 	/* Already recording -> do nothing */
 	if (Recording) return;
 	/* Off and File inputs -> no recording -> do nothing */
-	if (index == VIEW_INPUT_OFF || index == VIEW_INPUT_FILE) return;
+	if (index == VIEW_INPUT_OFF) return;
 
 	/* wait for the socket */
 	while (socket_fd < 0) {
@@ -1337,19 +924,6 @@ void InputManager::start_recording() {
 	/* flush socket input */
 	while (idle_socket());
 
-	if (Playing) {
-		close_play_avi();
-		vt_play.clear();
-		vt_play = vt_rec;
-		vt_play.video_total_frames = vt_play.video_index.size();
-		play_avi = capture_avi;
-	}
-	else {
-		close_play_avi();
-		vt_play.clear();
-		play_avi = "";
-	}
-	close_capture_avi();
 	vt_rec.clear();
 	capture_avi = "";
 
@@ -1442,16 +1016,9 @@ void InputManager::start_recording() {
 			vt_rec.video_height = height;
 			vt_rec.video_rate_n = raten;
 			vt_rec.video_rate_d = rated;
-			vt_rec.video_current_frame = -1LL;
 			vt_rec.video_total_frames = 0LL;
 			vt_rec.video_first_frame = -1LL;
 			vt_rec.start_time = start_time;
-			assert(capture_avi_fd < 0);
-
-			capture_avi_fd = open(capture_avi.c_str(),O_RDONLY);
-			if (capture_avi_fd < 0)
-				fprintf(stderr,"Recording program said it uses '%s' but I was unable to open the AVI. Playback will not be available. Error: %s\n",capture_avi.c_str(),strerror(errno));
-
 			break;
 		}
 		else if (!strcmp(msg,"FAILED")) {
@@ -1459,8 +1026,6 @@ void InputManager::start_recording() {
 			break;
 		}
 	} while (1);
-
-	play_is_rec = (play_avi != "" && capture_avi != "" && play_avi == capture_avi);
 
 	if (ack) {
 		string tmp = string(CurrentInputObj()->osd_name) + "\nRec: ";
@@ -1499,195 +1064,7 @@ void InputManager::stop_recording() {
 	socket_command("record-off");
 	/* TODO: Read back response indicating whether recording started, and what capture file */
 
-	/* if the playback AVI is the capture AVI, and the user isn't playing, then reset the playback pointer */
-	if (!Playing && play_is_rec) {
-		vt_rec.video_current_frame = -1LL;
-	}
-
 	Recording = false;
-}
-
-void InputManager::start_playback() {
-	if (Playing && !Paused) return;
-	if (index == VIEW_INPUT_OFF) return;
-
-	playback_speed_n = 1;
-	playback_speed_d = 1;
-
-	if (Playing) {
-		if (Paused) {
-			video_tracking *trk = (play_is_rec ? &vt_rec : &vt_play);
-
-			if (index == VIEW_INPUT_FILE && (trk->video_current_frame+1) >= trk->video_total_frames) {
-				trk->video_current_frame = -1LL; /* force rescan */
-				playback_base_frame = 0LL; /* restart from beginning */
-				playback_base_time = NOW;
-			}
-			else {
-				trk->video_current_frame = -1LL; /* force rescan */
-				playback_base_time = NOW;
-			}
-		}
-	}
-	else {
-		if (play_avi == "") {
-			fprintf(stderr,"Play file not selected, using what you are recording/have recorded now\n");
-			close_play_avi();
-			vt_play.clear();
-			play_avi = capture_avi;
-		}
-
-		if (play_avi == "") {
-			if (index == VIEW_INPUT_FILE) {
-				string tmp = string(CurrentInputObj()->osd_name) + "\nPlay *FAILED*\nUse File -> Open to choose";
-				osd_set_text_big(tmp.c_str());
-			}
-			else {
-				string tmp = string(CurrentInputObj()->osd_name) + "\nPlay *FAILED* Nothing to play ";
-				osd_set_text_big(tmp.c_str());
-			}
-
-			return;
-		}
-
-		update_now_time();
-		play_is_rec = (play_avi == capture_avi);
-		if (play_is_rec) fprintf(stderr,"Playback file is what you are recording now\n");
-
-		if (Recording) {
-			/* if recording, then playback will always begin just before where you were recording.
-			 * just as on VHS, if you hit STOP then PLAY, you ended up right where you were just recording. */
-			if (!play_is_rec) {
-				close_play_avi();
-				vt_play.clear();
-				play_is_rec = true;
-				play_avi = capture_avi;
-			}
-
-			/* trigger reset decoding */
-			vt_rec.video_current_frame = -1LL;
-			playback_base_frame = vt_rec.video_total_frames - 2LL;
-			playback_base_time = NOW;
-		}
-		else {
-			/* use the "current frame" pointer to enable random access across the input's recordings */
-			if (play_is_rec) {
-				playback_base_frame = vt_rec.video_current_frame;
-				playback_base_time = NOW;
-
-				/* the user might hit "play" again to replay the file */
-				if (playback_base_frame >= vt_rec.video_total_frames) {
-					playback_base_frame = 0;
-					vt_rec.video_current_frame = -1LL;
-				}
-			}
-			else {
-				playback_base_frame = vt_play.video_current_frame;
-				playback_base_time = NOW;
-			}
-		}
-
-		/* current_frame might be -1LL if nothing played yet */
-		if (playback_base_frame == -1LL)
-			playback_base_frame = 0LL;
-	}
-
-	{
-		string tmp = string(CurrentInputObj()->osd_name) + "\nPlay: ";
-		const char *s = strrchr(CurrentInputObj()->play_avi.c_str(),'/');
-		if (s != NULL) s++;
-		else s = CurrentInputObj()->play_avi.c_str();
-		tmp += s;
-		osd_set_text_big(tmp.c_str());
-	}
-
-	Playing = true;
-	Paused = false;
-
-	if (video_should_redraw_t < 0) video_should_redraw_t = NOW + 0.2;
-	if (do_video_source(CurrentInputObj(),true))
-		client_area_redraw_source_frame();
-}
-
-void InputManager::pause_playback() {
-	if (!Playing) {
-		start_playback();
-		if (!Playing) return;
-	}
-
-	{
-		string tmp = string(CurrentInputObj()->osd_name) + "\nPause: ";
-		const char *s = strrchr(CurrentInputObj()->play_avi.c_str(),'/');
-		if (s != NULL) s++;
-		else s = CurrentInputObj()->play_avi.c_str();
-		tmp += s;
-		osd_set_text_big(tmp.c_str());
-	}
-
-	if (!Paused) {
-		update_now_time();
-		playback_base_frame = time_to_target_frame_clipped();
-		playback_base_time = NOW;
-	}
-
-	Paused = true;
-
-	playback_speed_n = 1;
-	playback_speed_d = 1;
-
-	if (video_should_redraw_t < 0) video_should_redraw_t = NOW + 0.2;
-	if (do_video_source(CurrentInputObj(),true))
-		client_area_redraw_source_frame();
-}
-
-void InputManager::stop_playback() {
-	if (!Playing) return;
-
-	{
-		string tmp = string(CurrentInputObj()->osd_name) + "\nStop: ";
-		const char *s = strrchr(CurrentInputObj()->play_avi.c_str(),'/');
-		if (s != NULL) s++;
-		else s = CurrentInputObj()->play_avi.c_str();
-		tmp += s;
-
-		if (CurrentInputObj()->Recording) {
-			const char *s = strrchr(CurrentInputObj()->capture_avi.c_str(),'/');
-			if (s != NULL) s++;
-			else s = CurrentInputObj()->capture_avi.c_str();
-			tmp += string("\nRec: ") + s;
-		}
-
-		osd_set_text_big(tmp.c_str());
-	}
-
-	update_now_time();
-	playback_base_frame = time_to_target_frame_clipped();
-	playback_base_time = NOW;
-
-	playback_speed_n = 1;
-	playback_speed_d = 1;
-
-	Playing = false;
-	Paused = false;
-
-	/* File input: this should rewind back to the beginning of the file */
-	if (index == VIEW_INPUT_FILE) {
-		vt_play.video_current_frame = -1LL;
-		playback_base_frame = 0LL;
-	}
-
-	if (video_should_redraw_t < 0) video_should_redraw_t = NOW + 0.2;
-	if (do_video_source(CurrentInputObj(),true))
-		client_area_redraw_source_frame();
-}
-
-void InputManager::single_step(int frames) {
-	if (!Playing) {
-		start_playback();
-		if (!Playing) return;
-	}
-
-	Paused = true;
 }
 
 /* SMPTE colorbars (8-bit Y Cb Cr values) */
@@ -2273,24 +1650,13 @@ bool put_live_frame_on_screen(InputManager *input,bool force_redraw/*TODO*/) {
 
 	if (!input->Playing && input->vt_rec.video_rate_n > 0UL && input->vt_rec.video_rate_d > 0UL) {
 		char tmp[256];
-		const char *name;
 		unsigned int H,M,S,mS;
 		unsigned long long tm;
 		unsigned int tH,tM,tS,tmS;
-
-		if (input->play_is_rec)
-			name = strrchr(input->capture_avi.c_str(),'/');
-		else
-			name = strrchr(input->play_avi.c_str(),'/');
+		const char *name = strrchr(input->capture_avi.c_str(),'/');
 
 		if (name == NULL) name = "";
 		else if (*name == '/') name++;
-
-		tm = ((max(input->vt_rec.video_current_frame,0LL) * 1000LL) * input->vt_rec.video_rate_d) / input->vt_rec.video_rate_n;
-		mS = (unsigned int)(tm % 1000LL);
-		S = (unsigned int)((tm / 1000LL) % 60ULL);
-		M = (unsigned int)((tm / 1000LL / 60LL) % 60ULL);
-		H = (unsigned int)(tm / 1000LL / 3600LL);
 
 		tm = ((input->vt_rec.video_total_frames * 1000LL) * input->vt_rec.video_rate_d) / input->vt_rec.video_rate_n;
 		tmS = (unsigned int)(tm % 1000LL);
@@ -2676,388 +2042,10 @@ void draw_osd() {
 	}
 }
 
-static unsigned char temp_avi_read[2*1024*1024];
-static bool temp_avi_frame_valid = false;
-static AVFrame *temp_avi_frame = NULL;
-
-bool put_temp_avi_frame_on_screen(InputManager *input) {
-	bool ret = false;
-
-	if (temp_avi_frame != NULL && temp_avi_frame->width != 0 && temp_avi_frame->height != 0) {
-		if (input->video_avcodec_ctx->pix_fmt == AV_PIX_FMT_YUV420P) {
-			client_area_check_source_size(temp_avi_frame->width,temp_avi_frame->height);
-
-			if (client_area_xvimage) {
-				assert(source_image_width >= temp_avi_frame->width);
-				assert(source_image_height >= temp_avi_frame->height);
-				unsigned int y;
-
-				size_t dYstride = client_area_xvimage->pitches[client_area_y_plane_index];
-				unsigned char *dY = (unsigned char*)client_area_xvimage->data + client_area_xvimage->offsets[client_area_y_plane_index];
-
-				size_t dUstride = client_area_xvimage->pitches[client_area_u_plane_index];
-				unsigned char *dU = (unsigned char*)client_area_xvimage->data + client_area_xvimage->offsets[client_area_u_plane_index];
-
-				size_t dVstride = client_area_xvimage->pitches[client_area_v_plane_index];
-				unsigned char *dV = (unsigned char*)client_area_xvimage->data + client_area_xvimage->offsets[client_area_v_plane_index];
-
-				for (y=0;y < temp_avi_frame->height;y++)
-					memcpy(dY+(y*dYstride),temp_avi_frame->data[0]+(y*temp_avi_frame->linesize[0]),min((size_t)temp_avi_frame->linesize[0],dYstride));
-
-				for (y=0;y < (temp_avi_frame->height/2);y++)
-					memcpy(dU+(y*dUstride),temp_avi_frame->data[1]+(y*temp_avi_frame->linesize[1]),min((size_t)temp_avi_frame->linesize[1],dUstride));
-
-				for (y=0;y < (temp_avi_frame->height/2);y++)
-					memcpy(dV+(y*dVstride),temp_avi_frame->data[2]+(y*temp_avi_frame->linesize[2]),min((size_t)temp_avi_frame->linesize[2],dVstride));
-
-				ret = true;
-			}
-			else if (client_area_image) {
-				if (client_area_image->bits_per_pixel == 32) {
-					yv12_to_client_area_rgb32(temp_avi_frame->data[0],temp_avi_frame->linesize[0],
-							temp_avi_frame->data[1],temp_avi_frame->linesize[1],
-							temp_avi_frame->data[2],temp_avi_frame->linesize[2],1);
-					ret = true;
-				}
-				else if (client_area_image->bits_per_pixel == 24) {
-					yv12_to_client_area_rgb24(temp_avi_frame->data[0],temp_avi_frame->linesize[0],
-							temp_avi_frame->data[1],temp_avi_frame->linesize[1],
-							temp_avi_frame->data[2],temp_avi_frame->linesize[2],1);
-					ret = true;
-				}
-				else if (client_area_image->bits_per_pixel == 16) {
-
-					/* it depends: is this 5:5:5 RGB or 5:6:5 RGB? */
-					if (client_area_image->green_mask == (0x3F << 5))
-						yv12_to_client_area_rgb16_565(temp_avi_frame->data[0],temp_avi_frame->linesize[0],
-								temp_avi_frame->data[1],temp_avi_frame->linesize[1],
-								temp_avi_frame->data[2],temp_avi_frame->linesize[2],1);
-					else
-						yv12_to_client_area_rgb16_555(temp_avi_frame->data[0],temp_avi_frame->linesize[0],
-								temp_avi_frame->data[1],temp_avi_frame->linesize[1],
-								temp_avi_frame->data[2],temp_avi_frame->linesize[2],1);
-
-					ret = true;
-				}
-			}
-		}
-		else if (input->video_avcodec_ctx->pix_fmt == AV_PIX_FMT_YUV422P) {
-			client_area_check_source_size(temp_avi_frame->width,temp_avi_frame->height);
-
-			if (client_area_xvimage) {
-				assert(source_image_width >= temp_avi_frame->width);
-				assert(source_image_height >= temp_avi_frame->height);
-				unsigned int y;
-
-				size_t dYstride = client_area_xvimage->pitches[client_area_y_plane_index];
-				unsigned char *dY = (unsigned char*)client_area_xvimage->data + client_area_xvimage->offsets[client_area_y_plane_index];
-
-				size_t dUstride = client_area_xvimage->pitches[client_area_u_plane_index];
-				unsigned char *dU = (unsigned char*)client_area_xvimage->data + client_area_xvimage->offsets[client_area_u_plane_index];
-
-				size_t dVstride = client_area_xvimage->pitches[client_area_v_plane_index];
-				unsigned char *dV = (unsigned char*)client_area_xvimage->data + client_area_xvimage->offsets[client_area_v_plane_index];
-
-				for (y=0;y < temp_avi_frame->height;y++)
-					memcpy(dY+(y*dYstride),temp_avi_frame->data[0]+(y*temp_avi_frame->linesize[0]),min((size_t)temp_avi_frame->linesize[0],dYstride));
-
-				for (y=0;y < temp_avi_frame->height;y++)
-					memcpy(dU+((y>>1)*dUstride),temp_avi_frame->data[1]+(y*temp_avi_frame->linesize[1]),min((size_t)temp_avi_frame->linesize[1],dUstride));
-
-				for (y=0;y < temp_avi_frame->height;y++)
-					memcpy(dV+((y>>1)*dVstride),temp_avi_frame->data[2]+(y*temp_avi_frame->linesize[2]),min((size_t)temp_avi_frame->linesize[2],dVstride));
-
-				ret = true;
-			}
-			else if (client_area_image) {
-				if (client_area_image->bits_per_pixel == 32) {
-					yv12_to_client_area_rgb32(temp_avi_frame->data[0],temp_avi_frame->linesize[0],
-							temp_avi_frame->data[1],temp_avi_frame->linesize[1],
-							temp_avi_frame->data[2],temp_avi_frame->linesize[2],0);
-					ret = true;
-				}
-				else if (client_area_image->bits_per_pixel == 24) {
-					yv12_to_client_area_rgb24(temp_avi_frame->data[0],temp_avi_frame->linesize[0],
-							temp_avi_frame->data[1],temp_avi_frame->linesize[1],
-							temp_avi_frame->data[2],temp_avi_frame->linesize[2],0);
-					ret = true;
-				}
-				else if (client_area_image->bits_per_pixel == 16) {
-
-					/* it depends: is this 5:5:5 RGB or 5:6:5 RGB? */
-					if (client_area_image->green_mask == (0x3F << 5))
-						yv12_to_client_area_rgb16_565(temp_avi_frame->data[0],temp_avi_frame->linesize[0],
-								temp_avi_frame->data[1],temp_avi_frame->linesize[1],
-								temp_avi_frame->data[2],temp_avi_frame->linesize[2],0);
-					else
-						yv12_to_client_area_rgb16_555(temp_avi_frame->data[0],temp_avi_frame->linesize[0],
-								temp_avi_frame->data[1],temp_avi_frame->linesize[1],
-								temp_avi_frame->data[2],temp_avi_frame->linesize[2],0);
-
-					ret = true;
-				}
-			}
-		}
-	}
-
-	return ret;
-}
-
-void InputManager::codec_check() {
-	if (video_avcodec == NULL) {
-		/* TODO: Support other codecs, if the AVI capture program is using them */
-		close_avcodec();
-		video_avcodec = avcodec_find_decoder(AV_CODEC_ID_H264);
-		if (video_avcodec != NULL) {
-			video_avcodec_ctx = avcodec_alloc_context3(video_avcodec);
-			if (video_avcodec_ctx != NULL) {
-				avcodec_get_context_defaults3(video_avcodec_ctx,video_avcodec);
-				video_avcodec_ctx->thread_count = how_many_cpus();
-				video_avcodec_ctx->thread_type = FF_THREAD_SLICE;
-				/* NTS: do NOT set FF_THREAD_FRAME because this code cannot handle it,
-				 *      it causes FFMPEG to buffer frames according to the number of threads,
-				 *      and delay them that much, when this code assumes that there is
-				 *      no delay. This code should be updated to properly handle delayed frames,
-				 *      so that eventually we can capture with B-frames and still allow
-				 *      random access. */
-//				video_avcodec_ctx->thread_type |= FF_THREAD_FRAME;
-				video_avcodec_ctx->flags2 |= AV_CODEC_FLAG2_FAST;
-				if (avcodec_open2(video_avcodec_ctx,video_avcodec,NULL)) {
-					fprintf(stderr,"Failed to open H264 codec\n");
-					av_free(video_avcodec_ctx);
-					video_avcodec_ctx = NULL;
-					video_avcodec = NULL;
-				}
-				else {
-					fprintf(stderr,"Video codec opened\n");
-				}
-			}
-			else {
-				fprintf(stderr,"Cannot alloc ffmpeg context\n");
-			}
-		}
-		else {
-			fprintf(stderr,"FFMPEG could not locate the MPEG-4 decoder\n");
-		}
-	}
-}
-
-bool put_play_frame_on_screen(InputManager *input,bool force_redraw) {
-	signed long long target_frame,actual_target_frame,scan;
-	size_t patience = 1000;
-	bool ret = false;
-
-	update_now_time();
-	if (input->Playing || input->index == VIEW_INPUT_FILE) {
-		video_tracking *trk = (input->play_is_rec ? &input->vt_rec : &input->vt_play);
-		int fd;
-
-		if (trk->video_rate_n == 0 || trk->video_rate_d == 0)
-			return false;
-
-		if (input->play_is_rec) {
-			if (input->capture_avi_fd < 0 && input->capture_avi != "") {
-				input->capture_avi_fd = open(input->capture_avi.c_str(),O_RDONLY);
-				fprintf(stderr,"PLAY==REC reopening capture '%s'\n",input->capture_avi.c_str());
-			}
-
-			fd = input->capture_avi_fd;
-		}
-		else {
-			if (input->play_avi_fd < 0 && input->play_avi != "") {
-				input->play_avi_fd = open(input->play_avi.c_str(),O_RDONLY);
-				fprintf(stderr,"PLAY!=REC reopening play '%s'\n",input->play_avi.c_str());
-			}
-
-			fd = input->play_avi_fd;
-		}
-
-		input->codec_check();
-		actual_target_frame = target_frame = input->time_to_target_frame();
-		if (trk->video_first_frame >= 0LL && target_frame < trk->video_first_frame)
-			target_frame = trk->video_first_frame;
-		else if (target_frame < 0LL)
-			target_frame = 0LL;
-
-		if (force_redraw)
-			fprintf(stderr,"forceredraw %lld != %lld of %lld\n",
-				trk->video_current_frame,target_frame,trk->video_total_frames);
-
-		if (target_frame != trk->video_current_frame || (input->play_is_rec && input->Recording)) {
-			char tmp[256];
-			const char *name;
-			unsigned int H,M,S,mS;
-			unsigned long long tm;
-			unsigned int tH,tM,tS,tmS;
-
-			assert(trk->video_rate_n != 0);
-			assert(trk->video_rate_d != 0);
-
-			if (input->play_is_rec)
-				name = strrchr(input->capture_avi.c_str(),'/');
-			else
-				name = strrchr(input->play_avi.c_str(),'/');
-
-			if (name == NULL) name = "";
-			else if (*name == '/') name++;
-
-			tm = ((target_frame * 1000LL) * trk->video_rate_d) / trk->video_rate_n;
-			mS = (unsigned int)(tm % 1000LL);
-			S = (unsigned int)((tm / 1000LL) % 60ULL);
-			M = (unsigned int)((tm / 1000LL / 60LL) % 60ULL);
-			H = (unsigned int)(tm / 1000LL / 3600LL);
-
-			tm = ((trk->video_total_frames * 1000LL) * trk->video_rate_d) / trk->video_rate_n;
-			tmS = (unsigned int)(tm % 1000LL);
-			tS = (unsigned int)((tm / 1000LL) % 60ULL);
-			tM = (unsigned int)((tm / 1000LL / 60LL) % 60ULL);
-			tH = (unsigned int)(tm / 1000LL / 3600LL);
-
-			snprintf(tmp,sizeof(tmp),"Playing %u:%02u:%02u.%03u out of %u:%02u:%02u.%03u %s",H,M,S,mS,tH,tM,tS,tmS,name);
-			gui_status(tmp);
-		}
-
-		if (actual_target_frame < 0 && input->playback_speed_n < 0) {
-			fprintf(stderr,"frame<=0 backwards\n");
-			if (input->index == VIEW_INPUT_FILE) {
-				input->pause_playback();
-				update_ui_controls();
-			}
-			else if (input->play_is_rec) {
-				input->pause_playback();
-				update_ui_controls();
-			}
-			else {
-				/* TODO: Jump to (chronologically) previous AVI */
-				input->pause_playback();
-				update_ui_controls();
-			}
-		}
-		else if (actual_target_frame > trk->video_total_frames && input->playback_speed_n > 0 && !(input->Recording && input->play_is_rec && input->playback_speed_n == 1 && input->playback_speed_d == 1)) {
-			fprintf(stderr,"frame>=total\n");
-			/* on the file input source, just stop at the end. the play start code will restart back
-			 * to the beginning if the user presses play */
-			if (input->index == VIEW_INPUT_FILE) {
-				input->pause_playback();
-				update_ui_controls();
-			}
-			/* if the playback file IS the capture file, and we're recording, switch back to "stop" mode */
-			else if (input->play_is_rec) {
-				input->stop_playback();
-				update_ui_controls();
-				fprintf(stderr,"PLAY==REC, hit the end, stopping\n");
-			}
-			else { /* else, switch to the (chronologically) next AVI file, or to "stop" if no more */
-				/* we exausted captured AVIs, jump to the AVI capturing NOW */
-				if (input->capture_avi != "" && input->play_avi != input->capture_avi) {
-					/* to capture AVI */
-					input->play_avi = "";
-					input->close_play_avi();
-					input->vt_play.clear();
-					input->play_avi = input->capture_avi;
-					input->play_is_rec = true;
-					input->vt_rec.video_current_frame = -1LL;
-					input->playback_base_frame = 0LL;
-					input->playback_base_time = NOW;
-
-					{
-						string tmp = string(CurrentInputObj()->osd_name) + "\nPlay: ";
-						const char *s = strrchr(CurrentInputObj()->play_avi.c_str(),'/');
-						if (s != NULL) s++;
-						else s = CurrentInputObj()->play_avi.c_str();
-						tmp += s;
-						osd_set_text_big(tmp.c_str());
-					}
-				}
-				/* or just stop entirely */
-				else {
-					input->play_avi = "";
-					input->close_play_avi();
-					input->vt_play.clear();
-					input->stop_playback();
-					fprintf(stderr,"Switching back to stop mode\n");
-				}
-				update_ui_controls();
-			}
-		}
-		/* TODO: You can do better than this: buffer frames up to a limit, and if asked to play backwards, just replay them instead of wasting the decoder's time */
-		else if (((trk->video_current_frame < target_frame && input->playback_speed_n > 0) ||
-			((trk->video_current_frame > target_frame || trk->video_current_frame < 0LL) && input->playback_speed_n < 0)) &&
-			trk->video_current_frame < trk->video_total_frames &&
-			trk->video_current_frame < (signed long long)trk->video_index.size() &&
-			trk->video_total_frames > 0LL && trk->video_current_frame != target_frame) {
-
-			if (target_frame >= (signed long long)trk->video_index.size())
-				target_frame = (signed long long)trk->video_index.size() - 1LL;
-
-			if (target_frame < trk->video_current_frame || target_frame > (trk->video_current_frame+60UL) || input->playback_speed_n < 0) {
-				/* jump to target, scan back to keyframe */
-				scan = target_frame;
-				if (scan >= trk->video_index.size()) scan = trk->video_index.size() - 1;
-				while (scan > 0LL && patience != 0 && scan < trk->video_index.size() &&
-					trk->video_index[scan].keyframe == 0) {
-					patience--;
-					scan--;
-				}
-
-				trk->video_current_frame = scan - 1LL;
-			}
-
-			/* then decode forward */
-			temp_avi_frame_valid = false;
-			while (trk->video_current_frame < target_frame && patience != 0) {
-				if (trk->video_current_frame < 0LL)
-					trk->video_current_frame = 0LL;
-				else
-					trk->video_current_frame++;
-
-				struct video_tracking::index_entry &ie =
-					trk->video_index[trk->video_current_frame];
-
-				/* locate the chunk, read, and decode */
-//				fprintf(stderr,"[%lld/%lld] sz=%lu @ %lld\n",trk->video_current_frame,target_frame,ie.size,ie.offset);
-				if (ie.size != 0UL && ie.offset != 0ULL && (ie.size+1024) < sizeof(temp_avi_read)) {
-					int rd,gotit=0;
-
-					lseek(fd,(signed long long)ie.offset,SEEK_SET);
-					rd = read(fd,temp_avi_read,ie.size);
-					if (rd < 0) rd = 0;
-					assert((rd+1024) < sizeof(temp_avi_read));
-					memset(temp_avi_read+rd,0,1023);
-
-					if (temp_avi_frame == NULL)
-						temp_avi_frame = av_frame_alloc();
-					if (temp_avi_frame != NULL && input->video_avcodec_ctx != NULL) {
-						AVPacket pkt={0};
-						pkt.data = temp_avi_read;
-						pkt.size = rd;
-						pkt.dts = pkt.dts = trk->video_current_frame;
-
-						if (avcodec_decode_video2(input->video_avcodec_ctx,temp_avi_frame,&gotit,&pkt) > 0 && gotit != 0) {
-							temp_avi_frame_valid = true;
-							ret = true;
-						}
-					}
-				}
-
-				patience--;
-			}
-		}
-
-		if (ret || force_redraw) {
-			if (ret=put_temp_avi_frame_on_screen(input))
-				client_area_redraw_source_frame();
-		}
-	}
-
-	return ret;
-}
-
 bool do_video_source(InputManager *input,bool force_redraw) {
 	bool ret;
 
-	if (input->Playing || input->index == VIEW_INPUT_FILE) ret = put_play_frame_on_screen(input,force_redraw);
-	else ret = put_live_frame_on_screen(input,force_redraw);
+	ret = put_live_frame_on_screen(input,force_redraw);
 
 	if (ret) draw_osd();
 
@@ -3066,9 +2054,6 @@ bool do_video_source(InputManager *input,bool force_redraw) {
 
 void switch_input(int x) {
 	if (CurrentInput != x) {
-		if (CurrentInputObj()->Playing)
-			CurrentInputObj()->pause_playback();
-
 		/* FIXME: This is for the audio dialog box. we should make this a more general "on switch" hook call system */
 		{
 			bool reopen;
@@ -3104,17 +2089,6 @@ void switch_input(int x) {
 					if (s != NULL) s++;
 					else s = CurrentInputObj()->capture_avi.c_str();
 					tmp += string("\nRec: ") + string(s);
-				}
-				if (CurrentInputObj()->Playing) {
-					if (CurrentInputObj()->Paused)
-						tmp += string("\nPause: ");
-					else
-						tmp += string("\nPlay: ");
-
-					const char *s = strrchr(CurrentInputObj()->play_avi.c_str(),'/');
-					if (s != NULL) s++;
-					else s = CurrentInputObj()->play_avi.c_str();
-					tmp += string(s);
 				}
 
 				osd_set_text_big(tmp.c_str());
@@ -3160,7 +2134,6 @@ bool InputManager::reopen_input() {
 	bool restart_process = (cap_pid >= 0)?true:false;
 	bool ok = true;
 
-	close_capture_avi();
 	shutdown_process();
 	if (restart_process) start_process();
 
@@ -3489,15 +2462,8 @@ bool InputManager::idle_socket() {
 					n = nn;
 				}
 
-				if (frame >= (vt_rec.video_index.size()+10000LL)) {
-					printf("Ingoring index entry, frame is too far into the future\n");
-				}
-				else if (frame >= 0LL && base >= 0LL) {
+				if (frame >= 0LL && base >= 0LL) {
 					struct video_tracking::index_entry entry = {0};
-
-					while ((size_t)frame > vt_rec.video_index.size()) {
-						vt_rec.video_index.push_back(entry);
-					}
 
 					if (vt_rec.video_first_frame == -1LL && keyframe)
 						vt_rec.video_first_frame = frame;
@@ -3505,7 +2471,6 @@ bool InputManager::idle_socket() {
 					entry.offset = base;
 					entry.size = length;
 					entry.keyframe = keyframe;
-					vt_rec.video_index.push_back(entry);
 //					printf("Index[%lld] base=%lld len=%ld key=%u\n",
 //						frame,base,length,keyframe);
 
@@ -3567,12 +2532,6 @@ void InputManager::close_shmem() {
 
 InputManager::InputManager(int input_index) {
     zebra = 0;
-	video_avcodec_ctx = NULL;
-	video_avcodec = NULL;
-	play_is_rec = false;
-	capture_avi_fd = -1;
-	play_avi_fd = -1;
-	Paused = false;
 	Playing = false;
 	Recording = false;
 	osd_name[0] = 0;
@@ -3608,33 +2567,7 @@ InputManager::InputManager(int input_index) {
 	shmem = NULL;
 }
 
-void InputManager::close_capture_avi() {
-	if (capture_avi_fd >= 0) {
-		close(capture_avi_fd);
-		capture_avi_fd = -1;
-	}
-}
-
-void InputManager::close_play_avi() {
-	if (play_avi_fd >= 0) {
-		close(play_avi_fd);
-		play_avi_fd = -1;
-	}
-}
-
-void InputManager::close_avcodec() {
-	if (video_avcodec_ctx) {
-		avcodec_close(video_avcodec_ctx);
-		av_free(video_avcodec_ctx);
-		video_avcodec_ctx = NULL;
-	}
-	video_avcodec = NULL;
-}
-
 InputManager::~InputManager() {
-	close_avcodec();
-	close_capture_avi();
-	close_play_avi();
 	shutdown_process();
 	close_socket();
 	close_shmem();
@@ -3670,10 +2603,6 @@ void InputManager::onActivate(bool on) {
 				return;
 			}
 		}
-
-		/* encourage our playback loop to re-decode to the temp_avi_frame */
-		video_tracking *trk = (play_is_rec ? &vt_rec : &vt_play);
-		trk->video_current_frame = -1LL;
 	}
 	else if (!Recording) {
 		if (cap_pid >= 0 && socket_fd >= 0) {
@@ -3737,57 +2666,23 @@ static void on_main_window_record(GtkMenuItem *menuitem,gpointer user_data) {
 
 /* ----------------------- PLAY -------------------------------*/
 static void on_main_window_control_play(GtkMenuItem *menuitem,const char *ui_mgr_path) {
-	bool sel = (bool)gtk_check_menu_item_get_active (GTK_CHECK_MENU_ITEM(main_window_control_play));
-	if (sel) { /* WARNING: Do not attempt to code UI changed on de-selection. update_ui_controls() causes toggle events and you risk funny behavior! */
-		CurrentInputObj()->start_playback();
-		update_ui_controls();
-	}
 }
 
 static void on_main_window_play(GtkMenuItem *menuitem,gpointer user_data) {
-	bool sel = (bool)gtk_toggle_tool_button_get_active (GTK_TOGGLE_TOOL_BUTTON(GTK_TOOL_BUTTON(main_window_toolbar_play)));
-	if (sel) { /* WARNING: Do not attempt to code UI changed on de-selection. update_ui_controls() causes toggle events and you risk funny behavior! */
-		CurrentInputObj()->start_playback();
-		update_ui_controls();
-	}
 }
 
 /* ----------------------- PAUSE -------------------------------*/
 static void on_main_window_control_pause(GtkMenuItem *menuitem,const char *ui_mgr_path) {
-	bool sel = (bool)gtk_check_menu_item_get_active (GTK_CHECK_MENU_ITEM(main_window_control_pause));
-	if (sel) { /* WARNING: Do not attempt to code UI changed on de-selection. update_ui_controls() causes toggle events and you risk funny behavior! */
-		if (!CurrentInputObj()->Playing || !CurrentInputObj()->Paused) CurrentInputObj()->pause_playback();
-		update_ui_controls();
-	}
 }
 
 static void on_main_window_pause(GtkMenuItem *menuitem,gpointer user_data) {
-	bool sel = (bool)gtk_toggle_tool_button_get_active (GTK_TOGGLE_TOOL_BUTTON(GTK_TOOL_BUTTON(main_window_toolbar_pause)));
-	if (sel) { /* WARNING: Do not attempt to code UI changed on de-selection. update_ui_controls() causes toggle events and you risk funny behavior! */
-		if (!CurrentInputObj()->Playing || !CurrentInputObj()->Paused) CurrentInputObj()->pause_playback();
-		update_ui_controls();
-	}
 }
 
 /* ----------------------- STOP -------------------------------*/
 static void on_main_window_control_stop(GtkMenuItem *menuitem,const char *ui_mgr_path) {
-	bool sel = (bool)gtk_check_menu_item_get_active (GTK_CHECK_MENU_ITEM(main_window_control_stop));
-	if (sel) { /* WARNING: Do not attempt to code UI changed on de-selection. update_ui_controls() causes toggle events and you risk funny behavior! */
-		if (CurrentInputObj()->Playing) {
-			CurrentInputObj()->stop_playback();
-			update_ui_controls();
-		}
-	}
 }
 
 static void on_main_window_stop(GtkMenuItem *menuitem,gpointer user_data) {
-	bool sel = (bool)gtk_toggle_tool_button_get_active (GTK_TOGGLE_TOOL_BUTTON(GTK_TOOL_BUTTON(main_window_toolbar_stop)));
-	if (sel) { /* WARNING: Do not attempt to code UI changed on de-selection. update_ui_controls() causes toggle events and you risk funny behavior! */
-		if (CurrentInputObj()->Playing) {
-			CurrentInputObj()->stop_playback();
-			update_ui_controls();
-		}
-	}
 }
 
 /* -------------------------- VIEWS -> TOOLBARS -> TOOLBAR ----------------------- */
@@ -5749,7 +4644,7 @@ static void on_main_window_video_expose(GtkWidget *widget,GdkEvent *event,gpoint
 			}
 
 			if (client_area_width > 0 && client_area_height > 0 && client_area_display && client_area_gc && client_area_image) {
-				if (!client_area_xvideo && CurrentInput >= VIEW_INPUT_FILE) {
+				if (!client_area_xvideo && CurrentInput > VIEW_INPUT_OFF) {
 					/* delay redrawing, the live feed or video playback will cause redraw anyway */
 					if (video_should_redraw_t < 0)
 						video_should_redraw_t = NOW + 0.1;
@@ -5863,8 +4758,8 @@ static void on_main_window_help_about(GtkAction *action, GtkWidget *window)
 
 	gtk_show_about_dialog (GTK_WINDOW (main_window),
 			"program-name", "Video project",
-			"version", "v0.1",
-			"copyright", "(C) 2011-2015 Jonathan Campbell",
+			"version", "v2.0",
+			"copyright", "(C) 2011-2024 Jonathan Campbell",
 			"license", license,
 			"website", "http://hackipedia.org",
 			"comments", "Video capture and archiving project",
@@ -5931,14 +4826,6 @@ static GtkActionEntry gtk_all_actions[] = {
 
 	{"ConfigMenu",		NULL,			"_Configuration"},
 
-	{"OpenCapture",		GTK_STOCK_OPEN,		"_Open Capture",
-		"<control>O",		"Open existing capture",
-			G_CALLBACK (on_file_capture_open)},
-
-	{"ConfigMenu_IP",	NULL,			"_IP input",
-		"<control><shift>I",	"Configure IP input",
-			G_CALLBACK (on_configuration_ip_input)},
-
 	{"ConfigMenu_X",	NULL,			"_X Windows video display",
 		"<control><shift>X",	"Configure how this program communicates with your X Windows desktop",
 			G_CALLBACK (on_configuration_x)},
@@ -5976,29 +4863,23 @@ static const gchar *ui_info =
 "<ui>"
 "  <menubar name='MenuBar'>"
 "    <menu action='FileMenu'>"
-"      <menuitem action='OpenCapture'/>"
-#if 0
-"      <menuitem action='ConvertVideo'/>"
-#endif
-"      <separator/>"
 "      <menuitem action='Quit'/>"
 "    </menu>"
 "    <menu action='ViewMenu'>"
 "      <menu action='ViewMenuToolbars'>"
 "	 <menuitem action='ViewMenuToolbars_Toolbar'/>"
-"	 <menuitem action='ViewMenuToolbars_Metadata'/>"
 "	 <menuitem action='ViewMenuToolbars_Status'/>"
 "      </menu>"
 "      <menu action='ViewMenuInput'>"
 "	 <menuitem action='ViewMenuInput_None'/>"
-"	 <menuitem action='ViewMenuInput_File'/>"
 "	 <menuitem action='ViewMenuInput_Input1'/>"
 "	 <menuitem action='ViewMenuInput_Input2'/>"
 "	 <menuitem action='ViewMenuInput_Input3'/>"
 "	 <menuitem action='ViewMenuInput_Input4'/>"
 "	 <menuitem action='ViewMenuInput_Input5'/>"
 "	 <menuitem action='ViewMenuInput_Input6'/>"
-"	 <menuitem action='ViewMenuInput_InputIP'/>"
+"	 <menuitem action='ViewMenuInput_Input7'/>"
+"	 <menuitem action='ViewMenuInput_Input8'/>"
 "      </menu>"
 "      <menu action='ViewMenuAspectRatio'>"
 "	 <menuitem action='ViewMenuAspectRatio_None'/>"
@@ -6015,14 +4896,8 @@ static const gchar *ui_info =
 "    </menu>"
 "    <menu action='ControlMenu'>"
 "      <menuitem action='ControlMenu_Record'/>"
-"      <separator/>"
-"      <menuitem action='ControlMenu_Play'/>"
-"      <menuitem action='ControlMenu_Pause'/>"
-"      <menuitem action='ControlMenu_Stop'/>"
 "    </menu>"
 "    <menu action='ConfigMenu'>"
-"      <menuitem action='ConfigMenu_IP'/>"
-"      <separator/>"
 "      <menuitem action='ConfigMenu_X'/>"
 "      <separator/>"
 "      <menuitem action='ConfigMenu_Audio'/>"
@@ -6038,47 +4913,22 @@ static const gchar *ui_info =
 "  <toolbar name='ToolBar'>"
 "    <toolitem action='Record'/>"
 "    <separator action='Sep1'/>"
-"    <toolitem action='Play'/>"
-"    <toolitem action='Pause'/>"
-"    <toolitem action='Stop'/>"
-"    <separator action='Sep2'/>"
 "    <toolitem action='ViewInput_None'/>"
-"    <toolitem action='ViewInput_File'/>"
 "    <toolitem action='ViewInput_Input1'/>"
 "    <toolitem action='ViewInput_Input2'/>"
 "    <toolitem action='ViewInput_Input3'/>"
 "    <toolitem action='ViewInput_Input4'/>"
 "    <toolitem action='ViewInput_Input5'/>"
 "    <toolitem action='ViewInput_Input6'/>"
-"    <toolitem action='ViewInput_InputIP'/>"
+"    <toolitem action='ViewInput_Input7'/>"
+"    <toolitem action='ViewInput_Input8'/>"
 "  </toolbar>"
 "</ui>";
 
 static gint on_video_key_press_event(GtkWidget *widget, GdkEventKey *ev) {
 	/* A-Z and spacebar generate corresponding ASCII codes.
 	 * Why the hell don't you GTK+ developers just say so?!? */
-	if (ev->keyval == ' ') {
-		/* Spacebar starts/pauses playback, Final Cut Pro style */
-		if (CurrentInputObj()->Playing) {
-			if (CurrentInputObj()->Paused)
-				CurrentInputObj()->start_playback();
-			else
-				CurrentInputObj()->pause_playback();
-		}
-		/* if not playing, then start playing */
-		else {
-			CurrentInputObj()->start_playback();
-		}
-
-		update_ui();
-	}
-	else if (ev->keyval == GDK_KEY_Escape) {
-		if (CurrentInputObj()->Playing) {
-			CurrentInputObj()->stop_playback();
-			update_ui();
-		}
-	}
-	else if (ev->keyval == 'R') {
+	if (ev->keyval == 'R') {
 		if (!CurrentInputObj()->Recording)
 			CurrentInputObj()->start_recording();
 		else if (ui_ask_stop_recording())
@@ -6087,111 +4937,12 @@ static gint on_video_key_press_event(GtkWidget *widget, GdkEventKey *ev) {
 		update_ui();
 
 	}
-	else if (ev->keyval == 'F') {
-		if (CurrentInput != VIEW_INPUT_FILE) {
-			switch_input(VIEW_INPUT_FILE);
-			update_ui();
-		}
-	}
-	else if (ev->keyval == 'I') {
-		if (CurrentInput != VIEW_INPUT_IP) {
-			switch_input(VIEW_INPUT_IP);
-			update_ui();
-		}
-	}
-	else if (ev->keyval >= '1' && ev->keyval <= '6') {
+	else if (ev->keyval >= '1' && ev->keyval <= '8') {
 		int target = (ev->keyval - '1') + VIEW_INPUT_1;
 		if (CurrentInput != target) {
 			switch_input(target);
 			update_ui();
 		}
-	}
-	else if (ev->keyval == GDK_KEY_Left || ev->keyval == GDK_KEY_Right) {
-		InputManager *in = CurrentInputObj();
-		video_tracking *trk = (in->play_is_rec ? &in->vt_rec : &in->vt_play);
-
-		if (in->Playing) {
-			if (in->Paused) {
-				unsigned int onesec = ((trk->video_rate_n + trk->video_rate_d - 1) / trk->video_rate_d);
-				unsigned int step = 1;
-				
-				if ((ev->state & GDK_SHIFT_MASK) && (ev->state & GDK_CONTROL_MASK))
-					step = onesec * 15;
-				else if (ev->state & GDK_CONTROL_MASK)
-					step = onesec * 5;
-				else if (ev->state & GDK_SHIFT_MASK)
-					step = onesec;
-
-				/* TODO: This should be a member of the InputManager class */
-				/* TODO: When we get to the beginning of the AVI, switch to the chronologically previous AVI */
-				/* TODO: When we get to the end of the AVI, switch to the chronologically next AVI, or to "stop" mode */
-				if (ev->keyval == GDK_KEY_Left) {
-					if (in->playback_base_frame > trk->video_first_frame) {
-						trk->video_current_frame = -1LL;
-						in->playback_base_frame -= step;
-						if (in->playback_base_frame < trk->video_first_frame)
-							in->playback_base_frame = trk->video_first_frame;
-					}
-				}
-				else if (ev->keyval == GDK_KEY_Right) {
-					if (in->playback_base_frame < trk->video_total_frames) {
-						in->playback_base_frame += step;
-						if (in->playback_base_frame > trk->video_total_frames)
-							in->playback_base_frame = trk->video_total_frames;
-					}
-				}
-			}
-			else {
-				in->pause_playback();
-				update_ui();
-			}
-		}
-		else {
-			in->pause_playback();
-			update_ui();
-		}
-
-		trk->video_current_frame = -1LL;
-	}
-	else if (ev->keyval == '.') { /* un-shifted '>' key, increase speed */
-		InputManager *in = CurrentInputObj();
-		video_tracking *trk = (in->play_is_rec ? &in->vt_rec : &in->vt_play);
-
-		if (in->Playing && !in->Paused) {
-			in->increase_speed();
-		}
-		else {
-			if (!in->Playing) {
-				in->pause_playback();
-			}
-			else if (in->Paused) {
-				in->start_playback();
-				in->ChangeSpeed(1,4);
-			}
-			update_ui();
-		}
-
-		trk->video_current_frame = -1LL;
-	}
-	else if (ev->keyval == ',') { /* un-shifted '<' key, decrease speed */
-		InputManager *in = CurrentInputObj();
-		video_tracking *trk = (in->play_is_rec ? &in->vt_rec : &in->vt_play);
-
-		if (in->Playing && !in->Paused) {
-			in->decrease_speed();
-		}
-		else {
-			if (!in->Playing) {
-				in->pause_playback();
-			}
-			else if (in->Paused) {
-				in->start_playback();
-				in->ChangeSpeed(-1,1);
-			}
-			update_ui();
-		}
-
-		trk->video_current_frame = -1LL;
 	}
 	else {
 		/* DEBUG */
@@ -6319,13 +5070,6 @@ static int init_main_window()
 			G_CALLBACK(on_main_window_view_toolbars_toolbar),
 			(void*)("/MenuBar/ViewMenu/ViewMenuToolbars/ViewMenuToolbars_Toolbar"));
 
-	tog_act = gtk_toggle_action_new ("ViewMenuToolbars_Metadata", "_Metadata", NULL, NULL);
-	gtk_toggle_action_set_active (tog_act, cfg_show_metadata);
-	gtk_action_group_add_action (action_group, GTK_ACTION(tog_act));
-	g_signal_connect(tog_act, "toggled",
-			G_CALLBACK(on_main_window_view_toolbars_metadata),
-			(void*)("/MenuBar/ViewMenu/ViewMenuToolbars/ViewMenuToolbars_Metadata"));
-
 	tog_act = gtk_toggle_action_new ("ViewMenuToolbars_Status", "_Status bar", NULL, NULL);
 	gtk_toggle_action_set_active (tog_act, cfg_show_status);
 	gtk_action_group_add_action (action_group, GTK_ACTION(tog_act));
@@ -6339,30 +5083,6 @@ static int init_main_window()
 	g_signal_connect(tog_act, "toggled",
 			G_CALLBACK(on_main_window_control_record),
 			(void*)("/MenuBar/ControlMenu/ControlMenu_Record"));
-
-	rad_act = gtk_radio_action_new ("ControlMenu_Play", "_Play", NULL, NULL, 1);
-	gtk_radio_action_set_group (rad_act, NULL);
-	gslist = gtk_radio_action_get_group (rad_act);
-	gtk_action_group_add_action (action_group, GTK_ACTION(rad_act));
-	g_signal_connect(rad_act, "changed",
-			G_CALLBACK(on_main_window_control_play),
-			(void*)("/MenuBar/ControlMenu/ControlMenu_Play"));
-
-	rad_act = gtk_radio_action_new ("ControlMenu_Pause", "_Pause", NULL, NULL, 0);
-	gtk_radio_action_set_group (rad_act, gslist);
-	gslist = gtk_radio_action_get_group (rad_act);
-	gtk_action_group_add_action (action_group, GTK_ACTION(rad_act));
-	g_signal_connect(rad_act, "changed",
-			G_CALLBACK(on_main_window_control_pause),
-			(void*)("/MenuBar/ControlMenu/ControlMenu_Pause"));
-
-	rad_act = gtk_radio_action_new ("ControlMenu_Stop", "_Stop", NULL, NULL, 0);
-	gtk_radio_action_set_group (rad_act, gslist);
-	gslist = gtk_radio_action_get_group (rad_act);
-	gtk_action_group_add_action (action_group, GTK_ACTION(rad_act));
-	g_signal_connect(rad_act, "changed",
-			G_CALLBACK(on_main_window_control_stop),
-			(void*)("/MenuBar/ControlMenu/ControlMenu_Stop"));
 
 	/* View aspect ratio */
 	rad_act = gtk_radio_action_new ("ViewMenuAspectRatio_None", "Match _Source", NULL, NULL, 0);
@@ -6407,14 +5127,6 @@ static int init_main_window()
 			G_CALLBACK(on_main_window_view_input_select),
 			NULL);
 	main_window_view_input_action = rad_act;
-
-	rad_act = gtk_radio_action_new ("ViewMenuInput_File", "_File", "Switch to file input", NULL, VIEW_INPUT_FILE);
-	gtk_radio_action_set_group (rad_act, gslist);
-	gslist = gtk_radio_action_get_group (rad_act);
-	gtk_action_group_add_action (action_group, GTK_ACTION(rad_act));
-	g_signal_connect(rad_act, "changed",
-			G_CALLBACK(on_main_window_view_input_select),
-			NULL);
 
 	rad_act = gtk_radio_action_new ("ViewMenuInput_Input1", "Input _1", "Switch to input #1", NULL, VIEW_INPUT_1);
 	gtk_radio_action_set_group (rad_act, gslist);
@@ -6464,7 +5176,15 @@ static int init_main_window()
 			G_CALLBACK(on_main_window_view_input_select),
 			NULL);
 
-	rad_act = gtk_radio_action_new ("ViewMenuInput_InputIP", "_IP", "Switch to IP input", NULL, VIEW_INPUT_IP);
+	rad_act = gtk_radio_action_new ("ViewMenuInput_Input7", "Input _7", "Switch to input #7", NULL, VIEW_INPUT_7);
+	gtk_radio_action_set_group (rad_act, gslist);
+	gslist = gtk_radio_action_get_group (rad_act);
+	gtk_action_group_add_action (action_group, GTK_ACTION(rad_act));
+	g_signal_connect(rad_act, "changed",
+			G_CALLBACK(on_main_window_view_input_select),
+			NULL);
+
+	rad_act = gtk_radio_action_new ("ViewMenuInput_Input8", "Input _8", "Switch to input #8", NULL, VIEW_INPUT_8);
 	gtk_radio_action_set_group (rad_act, gslist);
 	gslist = gtk_radio_action_get_group (rad_act);
 	gtk_action_group_add_action (action_group, GTK_ACTION(rad_act));
@@ -6542,15 +5262,6 @@ static int init_main_window()
 			NULL);
 	main_window_toolbar_input_action = rad_act;
 
-	/* Input: File button */
-	rad_act = gtk_radio_action_new ("ViewInput_File", "_File", "Switch to file input", NULL, VIEW_INPUT_FILE);
-	gtk_radio_action_set_group (rad_act, gslist);
-	gslist = gtk_radio_action_get_group (rad_act);
-	gtk_action_group_add_action (action_group, GTK_ACTION(rad_act));
-	g_signal_connect(rad_act, "changed",
-			G_CALLBACK(on_main_window_input_select),
-			NULL);
-
 	/* Input: Input 1 button */
 	rad_act = gtk_radio_action_new ("ViewInput_Input1", " 1 ", "Switch to input #1", NULL, VIEW_INPUT_1);
 	gtk_radio_action_set_group (rad_act, gslist);
@@ -6605,8 +5316,17 @@ static int init_main_window()
 			G_CALLBACK(on_main_window_input_select),
 			NULL);
 
-	/* Input: Input IP button */
-	rad_act = gtk_radio_action_new ("ViewInput_InputIP", "IP", "Switch to IP input", NULL, VIEW_INPUT_IP);
+	/* Input: Input 7 button */
+	rad_act = gtk_radio_action_new ("ViewInput_Input7", " 7 ", "Switch to input #7", NULL, VIEW_INPUT_7);
+	gtk_radio_action_set_group (rad_act, gslist);
+	gslist = gtk_radio_action_get_group (rad_act);
+	gtk_action_group_add_action (action_group, GTK_ACTION(rad_act));
+	g_signal_connect(rad_act, "changed",
+			G_CALLBACK(on_main_window_input_select),
+			NULL);
+
+	/* Input: Input 8 button */
+	rad_act = gtk_radio_action_new ("ViewInput_Input8", " 8 ", "Switch to input #8", NULL, VIEW_INPUT_8);
 	gtk_radio_action_set_group (rad_act, gslist);
 	gslist = gtk_radio_action_get_group (rad_act);
 	gtk_action_group_add_action (action_group, GTK_ACTION(rad_act));
@@ -6815,33 +5535,6 @@ static int init_main_window()
 	tmp = gtk_ui_manager_get_widget (main_window_ui_mgr, "/MenuBar/ControlMenu/ControlMenu_Record");
 	main_window_control_record = tmp;
 
-	/* play button */
-	tmp = gtk_ui_manager_get_widget (main_window_ui_mgr, "/ToolBar/Play");
-	gtk_tool_item_set_homogeneous (GTK_TOOL_ITEM(tmp), FALSE);
-	gtk_tool_button_set_icon_widget (GTK_TOOL_BUTTON(tmp), gtk_image_new_from_file ("play.png"));
-	main_window_toolbar_play = tmp;
-
-	tmp = gtk_ui_manager_get_widget (main_window_ui_mgr, "/MenuBar/ControlMenu/ControlMenu_Play");
-	main_window_control_play = tmp;
-
-	/* pause button */
-	tmp = gtk_ui_manager_get_widget (main_window_ui_mgr, "/ToolBar/Pause");
-	gtk_tool_item_set_homogeneous (GTK_TOOL_ITEM(tmp), FALSE);
-	gtk_tool_button_set_icon_widget (GTK_TOOL_BUTTON(tmp), gtk_image_new_from_file ("pause.png"));
-	main_window_toolbar_pause = tmp;
-
-	tmp = gtk_ui_manager_get_widget (main_window_ui_mgr, "/MenuBar/ControlMenu/ControlMenu_Pause");
-	main_window_control_pause = tmp;
-
-	/* stop button */
-	tmp = gtk_ui_manager_get_widget (main_window_ui_mgr, "/ToolBar/Stop");
-	gtk_tool_item_set_homogeneous (GTK_TOOL_ITEM(tmp), FALSE);
-	gtk_tool_button_set_icon_widget (GTK_TOOL_BUTTON(tmp), gtk_image_new_from_file ("stop.png"));
-	main_window_toolbar_stop = tmp;
-
-	tmp = gtk_ui_manager_get_widget (main_window_ui_mgr, "/MenuBar/ControlMenu/ControlMenu_Stop");
-	main_window_control_stop = tmp;
-
 	/* input: none button */
 	tmp = gtk_ui_manager_get_widget (main_window_ui_mgr, "/ToolBar/ViewInput_None");
 	gtk_tool_item_set_homogeneous (GTK_TOOL_ITEM(tmp), FALSE);
@@ -6850,15 +5543,6 @@ static int init_main_window()
 
 	tmp = gtk_ui_manager_get_widget (main_window_ui_mgr, "/MenuBar/ViewMenu/ViewMenuInput/ViewMenuInput_None");
 	main_window_view_input_none = tmp;
-
-	/* input: file button */
-	tmp = gtk_ui_manager_get_widget (main_window_ui_mgr, "/ToolBar/ViewInput_File");
-	gtk_tool_item_set_homogeneous (GTK_TOOL_ITEM(tmp), FALSE);
-	gtk_tool_button_set_icon_widget (GTK_TOOL_BUTTON(tmp), gtk_image_new_from_file ("in_file.png"));
-	main_window_toolbar_input_file = tmp;
-
-	tmp = gtk_ui_manager_get_widget (main_window_ui_mgr, "/MenuBar/ViewMenu/ViewMenuInput/ViewMenuInput_File");
-	main_window_view_input_file = tmp;
 
 	/* input: 1 button */
 	tmp = gtk_ui_manager_get_widget (main_window_ui_mgr, "/ToolBar/ViewInput_Input1");
@@ -6908,14 +5592,21 @@ static int init_main_window()
 	tmp = gtk_ui_manager_get_widget (main_window_ui_mgr, "/MenuBar/ViewMenu/ViewMenuInput/ViewMenuInput_Input6");
 	main_window_view_input_6 = tmp;
 
-	/* input: IP button */
-	tmp = gtk_ui_manager_get_widget (main_window_ui_mgr, "/ToolBar/ViewInput_InputIP");
+	/* input: 1 button */
+	tmp = gtk_ui_manager_get_widget (main_window_ui_mgr, "/ToolBar/ViewInput_Input7");
 	gtk_tool_item_set_homogeneous (GTK_TOOL_ITEM(tmp), FALSE);
-	gtk_tool_button_set_icon_widget (GTK_TOOL_BUTTON(tmp), gtk_image_new_from_file ("in_ip.png"));
-	main_window_toolbar_input_ip = tmp;
+	main_window_toolbar_input_7 = tmp;
 
-	tmp = gtk_ui_manager_get_widget (main_window_ui_mgr, "/MenuBar/ViewMenu/ViewMenuInput/ViewMenuInput_InputIP");
-	main_window_view_input_ip = tmp;
+	tmp = gtk_ui_manager_get_widget (main_window_ui_mgr, "/MenuBar/ViewMenu/ViewMenuInput/ViewMenuInput_Input7");
+	main_window_view_input_7 = tmp;
+
+	/* input: 1 button */
+	tmp = gtk_ui_manager_get_widget (main_window_ui_mgr, "/ToolBar/ViewInput_Input8");
+	gtk_tool_item_set_homogeneous (GTK_TOOL_ITEM(tmp), FALSE);
+	main_window_toolbar_input_8 = tmp;
+
+	tmp = gtk_ui_manager_get_widget (main_window_ui_mgr, "/MenuBar/ViewMenu/ViewMenuInput/ViewMenuInput_Input8");
+	main_window_view_input_8 = tmp;
 
 	tmp = gtk_ui_manager_get_widget (main_window_ui_mgr, "/MenuBar/ViewMenu/ViewMenuOSD");
 	main_window_view_osd = tmp;
@@ -7006,8 +5697,6 @@ int main(int argc,char **argv) {
 	load_application_icon();
 	ui_notification_log_init();
 
-	avcodec_register_all();
-
 	if (init_main_window()) {
 		g_error("Unable to initialize main window");
 		return 1;
@@ -7030,9 +5719,6 @@ int main(int argc,char **argv) {
 	ui_notification_log_free();
 	client_area_free();
 	free_inputs();
-
-	if (temp_avi_frame) av_free(temp_avi_frame);
-	temp_avi_frame = NULL;
 
 	return 0;
 }
