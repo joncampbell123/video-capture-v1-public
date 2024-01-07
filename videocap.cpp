@@ -366,6 +366,9 @@ GtkWidget*			main_window_metadata = NULL;
 GtkUIManager*			main_window_ui_mgr = NULL;
 GtkWidget*			main_window_contents = NULL;
 
+GtkWidget*			main_window_audio_settings = NULL;
+GtkWidget*			main_window_input_settings = NULL;
+
 GtkWidget*			main_window_control_record = NULL;
 GtkWidget*			main_window_toolbar_record = NULL;
 
@@ -804,6 +807,10 @@ void update_ui_controls() {
 	/* make sure the buttons reflect the Recording state */
 	gtk_check_menu_item_set_active_notoggle (GTK_CHECK_MENU_ITEM(main_window_control_record), CurrentInputObj()->Recording);
 	gtk_toggle_tool_button_set_active_notoggle (GTK_TOGGLE_TOOL_BUTTON(main_window_toolbar_record), CurrentInputObj()->Recording);
+
+	/* no setting input settings for "No Input" */
+	gtk_widget_set_sensitive(GTK_WIDGET(main_window_audio_settings), CurrentInput > VIEW_INPUT_OFF);
+	gtk_widget_set_sensitive(GTK_WIDGET(main_window_input_settings), CurrentInput > VIEW_INPUT_OFF);
 
 	/* Play/Pause = Radio buttons. Only need to set active one and the others will deactivate */
 	if (CurrentInputObj()->Playing) {
@@ -2662,27 +2669,6 @@ static void on_main_window_control_record(GtkMenuItem *menuitem,const char *ui_m
 static void on_main_window_record(GtkMenuItem *menuitem,gpointer user_data) {
 	bool sel = (bool)gtk_toggle_tool_button_get_active (GTK_TOGGLE_TOOL_BUTTON(GTK_TOOL_BUTTON(main_window_toolbar_record)));
 	CurrentInputObj()->onRecord(sel);
-}
-
-/* ----------------------- PLAY -------------------------------*/
-static void on_main_window_control_play(GtkMenuItem *menuitem,const char *ui_mgr_path) {
-}
-
-static void on_main_window_play(GtkMenuItem *menuitem,gpointer user_data) {
-}
-
-/* ----------------------- PAUSE -------------------------------*/
-static void on_main_window_control_pause(GtkMenuItem *menuitem,const char *ui_mgr_path) {
-}
-
-static void on_main_window_pause(GtkMenuItem *menuitem,gpointer user_data) {
-}
-
-/* ----------------------- STOP -------------------------------*/
-static void on_main_window_control_stop(GtkMenuItem *menuitem,const char *ui_mgr_path) {
-}
-
-static void on_main_window_stop(GtkMenuItem *menuitem,gpointer user_data) {
 }
 
 /* -------------------------- VIEWS -> TOOLBARS -> TOOLBAR ----------------------- */
@@ -5225,33 +5211,6 @@ static int init_main_window()
 			G_CALLBACK(on_main_window_record),
 			NULL);
 
-	/* Play button */
-	rad_act = gtk_radio_action_new ("Play", "_Play", NULL, NULL, 1);
-	gtk_radio_action_set_group (rad_act, NULL);
-	gslist = gtk_radio_action_get_group (rad_act);
-	gtk_action_group_add_action (action_group, GTK_ACTION(rad_act));
-	g_signal_connect(rad_act, "changed",
-			G_CALLBACK(on_main_window_play),
-			NULL);
-
-	/* Pause button */
-	rad_act = gtk_radio_action_new ("Pause", "_Pause", NULL, NULL, 0);
-	gtk_radio_action_set_group (rad_act, gslist);
-	gslist = gtk_radio_action_get_group (rad_act);
-	gtk_action_group_add_action (action_group, GTK_ACTION(rad_act));
-	g_signal_connect(rad_act, "changed",
-			G_CALLBACK(on_main_window_pause),
-			NULL);
-
-	/* Stop button */
-	rad_act = gtk_radio_action_new ("Stop", "_Stop", NULL, NULL, 0);
-	gtk_radio_action_set_group (rad_act, gslist);
-	gslist = gtk_radio_action_get_group (rad_act);
-	gtk_action_group_add_action (action_group, GTK_ACTION(rad_act));
-	g_signal_connect(rad_act, "changed",
-			G_CALLBACK(on_main_window_stop),
-			NULL);
-
 	/* Input: None button */
 	rad_act = gtk_radio_action_new ("ViewInput_None", "_None", "Switch input view off", NULL, VIEW_INPUT_OFF);
 	gtk_radio_action_set_group (rad_act, NULL);
@@ -5525,6 +5484,14 @@ static int init_main_window()
 			xvideo_request_base,
 			xvideo_event_base,
 			xvideo_error_base);
+
+	/* audio settings */
+	tmp = gtk_ui_manager_get_widget (main_window_ui_mgr, "/MenuBar/ConfigMenu/ConfigMenu_Audio");
+	main_window_audio_settings = tmp;
+
+	/* input settings */
+	tmp = gtk_ui_manager_get_widget (main_window_ui_mgr, "/MenuBar/ConfigMenu/ConfigMenu_Input");
+	main_window_input_settings = tmp;
 
 	/* record button */
 	tmp = gtk_ui_manager_get_widget (main_window_ui_mgr, "/ToolBar/Record");

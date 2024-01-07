@@ -53,7 +53,7 @@ capture_v4l_LDFLAGS = $(GTK_LIBS) -lrt -lavcodec -lavutil -lasound -pthread
 videocap_SOURCES = videocap.cpp now.c avi_writer.c avi_reader.c avi_rw_iobuf.c riff.c
 videocap_CFLAGS = $(GTK_CFLAGS) -D_FILE_OFFSET_BITS=64
 videocap_CXXFLAGS = $(GTK_CFLAGS) -D_FILE_OFFSET_BITS=64
-videocap_LDFLAGS = $(GTK_LIBS) -lXv -pthread -lrt -lX11 -lXv -lXext -lavcodec -lavutil -lasound
+videocap_LDFLAGS = $(GTK_LIBS) -lXv -pthread -lrt -lX11 -lXv -lXext -lasound
 
 install-exec-hook:
 
