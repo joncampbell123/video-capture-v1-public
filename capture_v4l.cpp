@@ -2753,6 +2753,7 @@ int main(int argc,char **argv) {
 						rd = -1;
 						av_frame->pts = avi_frame_counter;
 						if (avcodec_send_frame(fmp4_context,av_frame) >= 0) {
+							rd = 0;
 							if (avcodec_receive_packet(fmp4_context,pkt) >= 0) {
 								rd = pkt->size;
 								gotit = 1;
@@ -2903,6 +2904,7 @@ int main(int argc,char **argv) {
 						rd = -1;
 						av_frame->pts = avi_frame_counter;
 						if (avcodec_send_frame(fmp4_vbi_context,av_frame) >= 0) {
+							rd = 0;
 							if (avcodec_receive_packet(fmp4_vbi_context,pkt) >= 0) {
 								rd = pkt->size;
 								gotit = 1;
