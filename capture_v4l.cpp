@@ -2740,6 +2740,24 @@ int main(int argc,char **argv) {
 									avi_frame_counter++;
 								}
 							}
+                            else if (avi_frame_counter > (n+3ull)) {
+                                /* My Mirabox HDMI capture card seems to have a weird problem with 1080p60
+                                 * where it allows 60fps capture but it seems to send frames at like 61fps.
+                                 * The distance between avi_frame_counter and n slowly grows ever larger and
+                                 * manifests itself as a slow loss of A/V sync in the capture, often to about
+                                 * 3-6 seconds of A/V sync error within 1-2 minutes. It doesn't do this if you
+                                 * capture a 1080p60 source at 30fps nor does it do this with a 1080p60 source
+                                 * captured as 720p60. Weird. */
+                                double adj = ((double)(avi_frame_counter-(n+3ull)) * v4l_framerate_d) / v4l_framerate_n;
+                                if (adj > 0.25) adj = 0.25;
+
+                                fprintf(stderr,"avi_frame_counter exceeds source frame time (%llu > %llu) source must be sending a little fast (adj=%.3f)\n",
+                                    avi_frame_counter,n,adj);
+
+                                avi_file_start_monotime -= adj;
+                                avi_file_start_time -= adj;
+                                v4l_basetime -= adj;
+                            }
 						}
 
 						v4l_last_frame_delta = avi_frame_counter - v4l_last_frame;
