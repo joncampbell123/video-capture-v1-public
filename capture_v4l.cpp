@@ -286,10 +286,10 @@ static uint32_t			live_shm_gen = 11111;
 static string			live_shm_name;
 
 /* FFMPEG MPEG-4 encoder */
-static AVCodec*			fmp4_codec=NULL;
+static const AVCodec*		fmp4_codec=NULL;
 static AVCodecContext*		fmp4_context=NULL;
 
-static AVCodec*			fmp4_vbi_codec=NULL;
+static const AVCodec*		fmp4_vbi_codec=NULL;
 static AVCodecContext*		fmp4_vbi_context=NULL;
 
 static uint8_t			fmp4_temp[4*1024*1024];
@@ -526,7 +526,6 @@ static void open_avi_file() {
     else if (want_codec_sel == "mpeg2" || want_codec_sel == "mpeg2-422")
         codec_id = AV_CODEC_ID_MPEG2VIDEO;
 
-	avcodec_register_all();
 	if (fmp4_codec == NULL) {
 		if ((fmp4_codec = avcodec_find_encoder(codec_id)) == NULL) {
 			fprintf(stderr,"FFMPEG error, cannot find H.264 encoder\n");
@@ -541,7 +540,11 @@ static void open_avi_file() {
 		close_avi_file();
 		return;
 	}
+#if LIBAVCODEC_VERSION_INT >= AV_VERSION_INT(59,18,100) /* FFMPEG 5.0.3+ */
+	/* not needed */
+#else
 	avcodec_get_context_defaults3(fmp4_context,fmp4_codec);
+#endif
 
     if (codec_id == AV_CODEC_ID_H265) {
         if (v4l_height >= 720) {
@@ -617,7 +620,11 @@ static void open_avi_file() {
 		fmp4_context->pix_fmt = jpeg_yuv ? AV_PIX_FMT_YUVJ420P : AV_PIX_FMT_YUV420P;
 
 	fmp4_context->bit_rate_tolerance = fmp4_context->bit_rate / 2;
+#if LIBAVCODEC_VERSION_INT >= AV_VERSION_INT(59,18,100) /* FFMPEG 5.0.3+ */
+	/* no equivalent */
+#else
 	fmp4_context->noise_reduction = 0;
+#endif
 	fmp4_context->spatial_cplx_masking = 0.0;
 	fmp4_context->temporal_cplx_masking = 0.0;
 	fmp4_context->p_masking = 0.0;
@@ -700,7 +707,11 @@ static void open_avi_file() {
 			close_avi_file();
 			return;
 		}
+#if LIBAVCODEC_VERSION_INT >= AV_VERSION_INT(59,18,100) /* FFMPEG 5.0.3+ */
+		/* not needed */
+#else
 		avcodec_get_context_defaults3(fmp4_vbi_context,fmp4_vbi_codec);
+#endif
 
 		fmp4_vbi_context->bit_rate = 6000000;
 		fmp4_vbi_context->keyint_min = AVI_FRAMES_PER_GROUP;
@@ -712,7 +723,11 @@ static void open_avi_file() {
 		fmp4_vbi_context->max_b_frames = 0; /* don't use B-frames */
 		fmp4_vbi_context->pix_fmt = AV_PIX_FMT_YUV420P;
 		fmp4_vbi_context->bit_rate_tolerance = fmp4_vbi_context->bit_rate / 2;
+#if LIBAVCODEC_VERSION_INT >= AV_VERSION_INT(59,18,100) /* FFMPEG 5.0.3+ */
+		/* no equivalent */
+#else
 		fmp4_vbi_context->noise_reduction = 0;
+#endif
 		fmp4_vbi_context->spatial_cplx_masking = 0.0;
 		fmp4_vbi_context->temporal_cplx_masking = 0.0;
 		fmp4_vbi_context->p_masking = 0.0;
@@ -2713,18 +2728,22 @@ int main(int argc,char **argv) {
 						/* encode to MPEG-4 and store */
 						pkt = av_packet_alloc(); /* FFMPEG 4.4 no longer likes AVPacket allocated on stack */
 						assert(pkt != NULL);
-						pkt->data = fmp4_temp;
-						pkt->size = sizeof(fmp4_temp);
-						pkt->dts = avi_frame_counter;
-						pkt->pts = avi_frame_counter;
+						// NTS: Unlike FFMPEG 4.4.x, the packet coming back will point to it's own allocated buffers
+						//      and it will ignore our pointers passed in. FFMPEG 4.4.x also has this API.
+						rd = -1;
 						av_frame->pts = avi_frame_counter;
-						rd = avcodec_encode_video2(fmp4_context,pkt,av_frame,&gotit);
+						if (avcodec_send_frame(fmp4_context,av_frame) >= 0) {
+							if (avcodec_receive_packet(fmp4_context,pkt) >= 0) {
+								rd = pkt->size;
+								gotit = 1;
+							}
+						}
 						if (rd < 0) {
 							printf("Unable to encode frame rd=%d\n",rd);
 						}
-						else if (gotit == 0) {
-							printf("Hm? No output on %llu? rd=%d gotit=%u\n",
-								(unsigned long long)avi_frame_counter,rd,gotit);
+						else if (gotit == 0 || pkt->data == NULL || pkt->size == 0) {
+							printf("Hm? No output on %llu? rd=%d gotit=%u data=%p size=%d\n",
+								(unsigned long long)avi_frame_counter,rd,gotit,pkt->data,pkt->size);
 						}
 						else {
 							rd = pkt->size;
@@ -2739,13 +2758,13 @@ int main(int argc,char **argv) {
 								if (async_io) {
 									AVIPacket *p = new AVIPacket();
 									p->stream = AVI_STREAM_VIDEO;
-									p->set_data(fmp4_temp,rd);
+									p->set_data(pkt->data,rd);
 									p->set_flags((pkt->flags&AV_PKT_FLAG_KEY) ? riff_idx1_AVIOLDINDEX_flags_KEYFRAME : 0);
 									p->target_chunk = pkt->dts;
 									async_avi_queue_add(&p);
 								}
 								else {
-									if (avi_writer_stream_write(AVI,AVI_video,fmp4_temp,rd,
+									if (avi_writer_stream_write(AVI,AVI_video,pkt->data,rd,
 										(pkt->flags&AV_PKT_FLAG_KEY) ? riff_idx1_AVIOLDINDEX_flags_KEYFRAME : 0)) {
 										avi_writer_stream_index *si = AVI_video->sample_index + AVI_video->sample_write_chunk - 1;
 										socket_index_msg("V",pkt->dts,si->offset,si->length,(pkt->flags&AV_PKT_FLAG_KEY)?1:0);
@@ -2859,18 +2878,22 @@ int main(int argc,char **argv) {
 						/* encode to MPEG-4 and store */
 						pkt = av_packet_alloc();
 						assert(pkt != NULL);
-						pkt->data = fmp4_temp;
-						pkt->size = sizeof(fmp4_temp);
-						pkt->dts = avi_vbi_frame_counter;
-						pkt->pts = avi_vbi_frame_counter;
-						av_frame->pts = avi_vbi_frame_counter;
-						rd = avcodec_encode_video2(fmp4_vbi_context,pkt,av_frame,&gotit);
+						// NTS: Unlike FFMPEG 4.4.x, the packet coming back will point to it's own allocated buffers
+						//      and it will ignore our pointers passed in. FFMPEG 4.4.x also has this API.
+						rd = -1;
+						av_frame->pts = avi_frame_counter;
+						if (avcodec_send_frame(fmp4_vbi_context,av_frame) >= 0) {
+							if (avcodec_receive_packet(fmp4_vbi_context,pkt) >= 0) {
+								rd = pkt->size;
+								gotit = 1;
+							}
+						}
 						if (rd < 0) {
 							printf("Unable to encode frame rd=%d\n",rd);
 						}
-						else if (gotit == 0) {
-							printf("Hm? No output on %llu? rd=%d gotit=%u\n",
-									(unsigned long long)avi_vbi_frame_counter,rd,gotit);
+						else if (gotit == 0 || pkt->data == NULL || pkt->size == 0) {
+							printf("Hm? No output on %llu? rd=%d gotit=%u data=%p size=%d\n",
+								(unsigned long long)avi_frame_counter,rd,gotit,pkt->data,pkt->size);
 						}
 						else {
 							rd = pkt->size;
@@ -2885,13 +2908,13 @@ int main(int argc,char **argv) {
 								if (async_io) {
 									AVIPacket *p = new AVIPacket();
 									p->stream = AVI_STREAM_VBI;
-									p->set_data(fmp4_temp,rd);
+									p->set_data(pkt->data,rd);
 									p->set_flags((pkt->flags&AV_PKT_FLAG_KEY) ? riff_idx1_AVIOLDINDEX_flags_KEYFRAME : 0);
 									p->target_chunk = pkt->dts;
 									async_avi_queue_add(&p);
 								}
 								else {
-									avi_writer_stream_write(AVI,AVI_vbi_video,fmp4_temp,rd,
+									avi_writer_stream_write(AVI,AVI_vbi_video,pkt->data,rd,
 										(pkt->flags&AV_PKT_FLAG_KEY) ? riff_idx1_AVIOLDINDEX_flags_KEYFRAME : 0);
 								}
 							}
