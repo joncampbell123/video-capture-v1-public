@@ -227,6 +227,7 @@ static windows_WAVEFORMATEX	AVI_audio_fmt;
 static windows_BITMAPINFOHEADER	AVI_video_fmt;
 static windows_BITMAPINFOHEADER	AVI_vbi_video_fmt;
 static double			avi_file_start_time = -1;
+static double			avi_file_start_monotime = -1;
 static unsigned long long	avi_vbi_frame_counter = 0;
 static unsigned long long	avi_frame_counter = 0;
 static unsigned long long	avi_audio_samples = 0;
@@ -680,6 +681,7 @@ static void open_avi_file() {
 	avi_frame_counter = 0;
 	avi_vbi_frame_counter = 0;
 	avi_file_start_time = NOW;
+    avi_file_start_monotime = monoNOW;
 	sprintf(tmp,"/%s%12.3f.avi",file_prefix,NOW);
 	avi_file = capture_path + tmp;
 
@@ -2557,7 +2559,7 @@ int main(int argc,char **argv) {
 
 							if (v4l_basetime < 0) {
 								v4l_basetime = framt;
-								v4l_baseclock = avi_file_start_time;
+								v4l_baseclock = NOW;
 							}
 
 							framt -= v4l_basetime;
