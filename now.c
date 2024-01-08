@@ -26,7 +26,7 @@ void update_now_time() {
 	NOW_us = us_time();
 	NOW = (double)NOW_us / 1000000;
 	monoNOW_us = monotonic_clock_us();
-	monoNOW = (double)NOW_us / 1000000;
+	monoNOW = (double)monoNOW_us / 1000000;
 }
 
 void f_sleep_until(double n) {
