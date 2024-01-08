@@ -3021,7 +3021,7 @@ int main(int argc,char **argv) {
 							double tt;
 
 							// time to sample
-							tt = NOW - avi_file_start_time;
+							tt = monoNOW - avi_file_start_monotime;
 							if (tt < 0) tt = 0;
 							samp_should = (unsigned long long)(tt * audio_rate);
 							if (samp_should >= avail)
@@ -3101,8 +3101,9 @@ int main(int argc,char **argv) {
 									fprintf(AVI_logfile,"AVI audio stream is ahead at %.3f, slowing video down %.6f seconds at %llu samples\n",
 										tt,pad,(unsigned long long)avi_audio_samples);
 
+								avi_file_start_monotime -= pad;
 								avi_file_start_time -= pad;
-								avi_audio_err += pad;
+								avi_audio_err += (unsigned int)(pad * audio_rate);
 							}
 
 							// write audio
@@ -3124,7 +3125,7 @@ int main(int argc,char **argv) {
                     double tt;
 
                     // time to sample
-                    tt = NOW - avi_file_start_time;
+                    tt = monoNOW - avi_file_start_monotime;
                     if (tt < 0) tt = 0;
 
 					if (done == -EPIPE) {
