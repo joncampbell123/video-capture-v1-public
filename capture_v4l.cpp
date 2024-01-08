@@ -2995,9 +2995,13 @@ int main(int argc,char **argv) {
 
 				max = sizeof(fmp4_temp) / sizeof(int16_t) / audio_channels;
 				done = snd_pcm_readi(alsa_pcm, fmp4_temp, max);
+
 				if (done > 0) {
 					unsigned long b = (unsigned long)done * sizeof(int16_t) * audio_channels;
 					assert(b <= sizeof(fmp4_temp));
+
+					if (avail < done)
+						avail = done;
 
 					// metering
 					for (unsigned int samp=0;samp < (unsigned int)done;samp++) {
@@ -3020,6 +3024,10 @@ int main(int argc,char **argv) {
 							tt = NOW - avi_file_start_time;
 							if (tt < 0) tt = 0;
 							samp_should = (unsigned long long)(tt * audio_rate);
+							if (samp_should >= avail)
+								samp_should -= avail;
+							else
+								samp_should = 0;
 
 #if 0 // NTS: Capture delay according to ALSA seems to be buffer size + available.
       //      This is causing visible A/V sync error in my captures. Stop doing this.
