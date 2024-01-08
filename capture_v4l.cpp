@@ -635,8 +635,15 @@ static void open_avi_file() {
 	fmp4_context->qmax = 63;
 //	fmp4_context->me_range = 8;
 //	fmp4_context->dia_size = -3;
-	fmp4_context->rc_max_rate = fmp4_context->bit_rate;
-	fmp4_context->rc_min_rate = fmp4_context->bit_rate;
+	if (codec_id == AV_CODEC_ID_MPEG4 || codec_id == AV_CODEC_ID_MPEG2VIDEO) {
+		fmp4_context->rc_max_rate = fmp4_context->bit_rate * 2;
+		fmp4_context->rc_min_rate = fmp4_context->bit_rate / 15;
+		/* they cannot match else these codecs complain about rc_eq */
+	}
+	else {
+		fmp4_context->rc_max_rate = fmp4_context->bit_rate;
+		fmp4_context->rc_min_rate = fmp4_context->bit_rate;
+	}
 //	fmp4_context->pre_dia_size = 3;
 	fmp4_context->rc_buffer_size = fmp4_context->bit_rate * 2;
 	fmp4_context->sample_aspect_ratio.num = 1;
