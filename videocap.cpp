@@ -362,7 +362,6 @@ GtkWidget*			infobar = NULL;
 #endif
 GtkWidget*			main_window = NULL;
 GtkWidget*			main_window_status = NULL;
-GtkWidget*			main_window_metadata = NULL;
 GtkUIManager*			main_window_ui_mgr = NULL;
 GtkWidget*			main_window_contents = NULL;
 
@@ -2691,20 +2690,6 @@ static void on_main_window_view_toolbars_toolbar(GtkMenuItem *menuitem,const cha
 		gtk_widget_hide (obj);
 }
 
-/* -------------------------- VIEWS -> TOOLBARS -> METADATA ----------------------- */
-static void on_main_window_view_toolbars_metadata(GtkMenuItem *menuitem,const char *ui_mgr_path) {
-	GtkWidget *x = gtk_ui_manager_get_widget (main_window_ui_mgr, ui_mgr_path);
-	if (x == NULL) {
-		g_error("Unable to retrieve widget '%s' via UI manager",ui_mgr_path);
-		return;
-	}
-
-	if (cfg_show_metadata = gtk_check_menu_item_get_active (GTK_CHECK_MENU_ITEM(x)))
-		gtk_widget_show (main_window_metadata);
-	else
-		gtk_widget_hide (main_window_metadata);
-}
-
 /* -------------------------- VIEWS -> TOOLBARS -> STATUS ----------------------- */
 static void on_main_window_view_toolbars_status(GtkMenuItem *menuitem,const char *ui_mgr_path) {
 	GtkWidget *x = gtk_ui_manager_get_widget (main_window_ui_mgr, ui_mgr_path);
@@ -5006,14 +4991,11 @@ static int init_main_window()
 	GtkWidget *tmp1;
 	GtkWidget *table;
 	GtkWidget *contents;
-	GtkWidget *contents_info;
 	GtkWidget *sw;
 	GtkWidget *tmp,*tmpi;
 	GtkWidget *bar;
-	GtkWidget *contents_info_list_view;
 	GtkWidget *vpane;
 	GSList *gslist;
-	GtkListStore *contents_info_list_store;
 	GtkActionGroup *action_group;
 	GtkToggleAction *tog_act;
 	GtkRadioAction *rad_act;
@@ -5372,59 +5354,12 @@ static int init_main_window()
 	gtk_signal_connect (GTK_OBJECT(contents), "key_press_event", (GtkSignalFunc)on_video_key_press_event, NULL);
 	gtk_widget_set_events(contents, GDK_BUTTON_PRESS_MASK | GDK_BUTTON_RELEASE_MASK | GDK_POINTER_MOTION_MASK | GDK_POINTER_MOTION_HINT_MASK | GDK_LEAVE_NOTIFY_MASK);
 
-	contents_info = gtk_scrolled_window_new (NULL, NULL);
-
-	gtk_scrolled_window_set_policy (GTK_SCROLLED_WINDOW(contents_info),
-			GTK_POLICY_AUTOMATIC,
-			GTK_POLICY_AUTOMATIC);
-
-	gtk_scrolled_window_set_shadow_type (GTK_SCROLLED_WINDOW(contents_info),
-			GTK_SHADOW_OUT);
-
-	gtk_widget_set_size_request (contents_info, 210, 100);
-	gtk_paned_pack2 (GTK_PANED(vpane), contents_info, TRUE, FALSE);
-
-
-	contents_info_list_store = gtk_list_store_new (2, G_TYPE_STRING, G_TYPE_STRING);
-#if defined(METADATA_STOCK_DEBUG)
-	for (i=0;metadata_stock[i].name != NULL;i++) {
-		GtkTreeIter iter;
-		gtk_list_store_append (contents_info_list_store, &iter);
-		gtk_list_store_set (contents_info_list_store, &iter,
-				0, metadata_stock[i].name,
-				1, metadata_stock[i].value,
-				-1);
-	}
-#endif
-
-	contents_info_list_view = gtk_tree_view_new_with_model (GTK_TREE_MODEL(contents_info_list_store));
-
-	{
-		GtkCellRenderer *r = gtk_cell_renderer_text_new();
-		GtkTreeViewColumn *c = gtk_tree_view_column_new_with_attributes ("Name", r, "text", 0, NULL);
-		gtk_tree_view_column_set_sizing (c, GTK_TREE_VIEW_COLUMN_FIXED);
-		gtk_tree_view_column_set_fixed_width (c, 160);
-		gtk_tree_view_append_column (GTK_TREE_VIEW(contents_info_list_view), c);
-		gtk_tree_view_column_set_resizable (c, TRUE);
-	}
-
-	{
-		GtkCellRenderer *r = gtk_cell_renderer_text_new();
-		GtkTreeViewColumn *c = gtk_tree_view_column_new_with_attributes ("Value", r, "text", 1, NULL);
-		gtk_tree_view_append_column (GTK_TREE_VIEW(contents_info_list_view), c);
-		gtk_tree_view_column_set_resizable (c, TRUE);
-	}
-
-	gtk_container_add (GTK_CONTAINER(contents_info), contents_info_list_view);
-
 	gtk_table_attach (GTK_TABLE (table),
 			vpane,
 			/* X direction */       /* Y direction */
 			0, 1,                   3, 4,
 			(GtkAttachOptions)(GTK_EXPAND | GTK_FILL),  (GtkAttachOptions)(GTK_EXPAND | GTK_FILL),
 			0,                      0);
-
-	main_window_metadata = contents_info;
 
 	gtk_widget_set_app_paintable (GTK_WIDGET(contents), TRUE);
 #ifdef GTK_HAS_INFO_BAR
@@ -5588,9 +5523,6 @@ static int init_main_window()
 
 	if (cfg_show_status) gtk_widget_show (main_window_status);
 	else gtk_widget_hide (main_window_status);
-
-	if (cfg_show_metadata) gtk_widget_show (main_window_metadata);
-	else gtk_widget_hide (main_window_metadata);
 
 	tmp1 = gtk_ui_manager_get_widget (main_window_ui_mgr, "/ToolBar");
 	assert(tmp1 != NULL);
