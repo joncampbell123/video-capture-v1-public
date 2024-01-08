@@ -2861,8 +2861,14 @@ static gint v4l_vcrhack_dropdown_populate_and_select(GtkWidget *listbox,GtkListS
 
 static gint v4l_codec_dropdown_populate_and_select(GtkWidget *listbox,GtkListStore *list) {
 	static const char *modelist[] = {
+        "mpeg2",
+        "mpeg2-422",
+        "mpeg4",
+        "mpeg4-422",
 		"h264",
 		"h264-422",
+        "h265",
+        "h265-422",
 		NULL
 	};
 	void **hints,**n;
