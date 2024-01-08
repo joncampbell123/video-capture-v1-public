@@ -269,7 +269,7 @@ static char			v4l_devname[64];
 static int			v4l_fd = -1;
 static struct v4l2_buffer	v4l_buf[30];
 static unsigned char*		v4l_ptr[30]={NULL};
-static double			v4l_basetime = -1,v4l_baseclock = 0;
+static double			v4l_basetime = -1;
 
 static struct v4l2_capability	v4l_caps;
 static struct v4l2_format	v4l_fmt;
@@ -2587,13 +2587,19 @@ int main(int argc,char **argv) {
 								(((double)vb->timestamp.tv_usec) / 1000000);
 
 							if (v4l_basetime < 0) {
-								v4l_basetime = framt;
-								v4l_baseclock = NOW;
+								/* The V4L linux API helpfully allows the driver to indicate if the timestamp is monotonic time */
+								if ((vb->flags&V4L2_BUF_FLAG_TIMESTAMP_MASK) == V4L2_BUF_FLAG_TIMESTAMP_MONOTONIC) {
+									fprintf(stderr,"Timestamp init: V4L driver is using monotonic time, yay!\n");
+									v4l_basetime = avi_file_start_monotime;
+								}
+								else {
+									fprintf(stderr,"Timestamp init: V4L driver is not using monotonic time, boo...\n");
+									v4l_basetime = framt - (monoNOW - avi_file_start_monotime);
+								}
 							}
 
 							framt -= v4l_basetime;
 							if (framt < 0) framt = 0;
-							framt += v4l_baseclock;
 						}
 
 						v4l_interlaced = 0;
@@ -2722,9 +2728,9 @@ int main(int argc,char **argv) {
 						AVPacket *pkt;
 						int gotit=0;
 
-						if (framt > 0) {
-							double t = ((framt - avi_file_start_time) * v4l_framerate_n) / v4l_framerate_d;
-							if (t < -100) fprintf(stderr,"Warning: Frame time away behind AVI start time t=%.3f framt=%.3f avi_start=%.3f bt=%.3f bc=%.3f\n",t,framt,avi_file_start_time,v4l_basetime,v4l_baseclock);
+						if (framt >= 0) {
+							double t = (framt * v4l_framerate_n) / v4l_framerate_d;
+							if (t < -100) fprintf(stderr,"Warning: Frame time away behind AVI start time t=%.3f framt=%.3f avi_start=%.3f bt=%.3f\n",t,framt,avi_file_start_time,v4l_basetime);
 							if (t < 0) t = 0;
 							unsigned long long n = (unsigned long long)floor(t+0.5);
 
@@ -2829,7 +2835,7 @@ int main(int argc,char **argv) {
 
 		/* VBI */
 		if (vbi_fd >= 0 && vbi_buffer != NULL) {
-			double framt = NOW;
+			double framt = monoNOW;
 			AVFrame *av_frame;
 			int rd,expect;
 
@@ -2873,8 +2879,8 @@ int main(int argc,char **argv) {
 						int gotit=0;
 
 						if (framt > 0) {
-							double t = ((framt - avi_file_start_time) * v4l_framerate_n) / v4l_framerate_d;
-							if (t < -100) fprintf(stderr,"Warning: Frame time away behind AVI start time t=%.3f framt=%.3f avi_start=%.3f bt=%.3f bc=%.3f\n",t,framt,avi_file_start_time,v4l_basetime,v4l_baseclock);
+							double t = ((framt - avi_file_start_monotime) * v4l_framerate_n) / v4l_framerate_d;
+							if (t < -100) fprintf(stderr,"Warning: Frame time away behind AVI start time t=%.3f framt=%.3f avi_start=%.3f bt=%.3f\n",t,framt,avi_file_start_time,v4l_basetime);
 							if (t < 0) t = 0;
 							unsigned long long n = (unsigned long long)floor(t+0.5);
 
