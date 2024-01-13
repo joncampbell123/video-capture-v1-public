@@ -512,6 +512,7 @@ static void open_avi_file() {
 	if ((AVI = avi_writer_create()) == NULL)
 		return;
 
+	v4l_basetime = -1;
     v4l_last_frame = 0;
     v4l_last_vbi = 0;
     v4l_last_frame_delta = 0;
