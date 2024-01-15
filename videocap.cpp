@@ -170,6 +170,7 @@ public:
 	void increase_speed();
 	void decrease_speed();
 	bool start_process();
+	bool start_process_video4linux();
 	bool reopen_input();
 	void shutdown_process();
 	void close_socket();
@@ -2168,6 +2169,13 @@ bool InputManager::reopen_input() {
 }
 
 bool InputManager::start_process() {
+	if (backend == "video4linux")
+		return start_process_video4linux();
+
+	return true;
+}
+
+bool InputManager::start_process_video4linux() {
 	struct stat st;
 	struct sockaddr_un un;
 	char tmp[256],param_1[64],param_2[64];
@@ -3365,10 +3373,6 @@ static bool update_vars_from_backend_dialog() {
 	if (old_backend != CurrentInputObj()->backend)
 		do_reopen = true;
 
-	/* reopen */
-	if (do_reopen)
-		CurrentInputObj()->reopen_input();
-
 	return do_reopen;
 }
 
@@ -3568,10 +3572,6 @@ static bool update_vars_from_input_dialog() {
 	if (old_vcrhack != CurrentInputObj()->vcrhack)
 		do_reopen = true;
 
-	/* reopen */
-	if (do_reopen)
-		CurrentInputObj()->reopen_input();
-
 	return do_reopen;
 }
 
@@ -3740,6 +3740,7 @@ static void on_input_dialog_response(GtkAction *action, gint response_id, gpoint
 		if (reopen) {
 			if (pthread_mutex_lock(&global_mutex) == 0) {
 				CurrentInputObj()->reopen_input();
+				CurrentInputObj()->onActivate(1);
 				pthread_mutex_unlock(&global_mutex);
 			}
 		}
@@ -3770,7 +3771,9 @@ static void on_backend_dialog_response(GtkAction *action, gint response_id, gpoi
 		reopen = update_vars_from_backend_dialog();
 		if (reopen) {
 			if (pthread_mutex_lock(&global_mutex) == 0) {
+				CurrentInputObj()->onActivate(0);
 				CurrentInputObj()->reopen_input();
+				CurrentInputObj()->onActivate(1);
 				pthread_mutex_unlock(&global_mutex);
 			}
 		}
