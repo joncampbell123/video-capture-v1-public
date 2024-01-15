@@ -113,6 +113,12 @@ enum {
 	OSD_BIG
 };
 
+const char *backends[] = {
+	"none",
+	"video4linux",
+	NULL
+};
+
 class video_tracking {
 public:
 	video_tracking() {
@@ -224,6 +230,7 @@ public:
 	double				capture_fps;
 	std::string			input_codec;
 	std::string			vcrhack;
+	std::string			backend;
 
 	/* video capture info */
 	video_tracking			vt_rec;			/* independent indexes for playback and recording */
@@ -277,6 +284,8 @@ GtkWidget*			ip_dialog = NULL;
 GtkWidget*			ip_dialog_ip_addr = NULL;
 GtkWidget*			ip_dialog_ip_port = NULL;
 GtkWidget*			ip_dialog_protocol = NULL;
+GtkWidget*			backend_dialog = NULL;
+GtkWidget*			backend_dialog_backend = NULL;
 
 bool				user_enable_osd = true;		/* whether the user wants the OSD messages */
 
@@ -367,6 +376,7 @@ GtkWidget*			main_window_contents = NULL;
 
 GtkWidget*			main_window_audio_settings = NULL;
 GtkWidget*			main_window_input_settings = NULL;
+GtkWidget*			main_window_backend_settings = NULL;
 
 GtkWidget*			main_window_control_record = NULL;
 GtkWidget*			main_window_toolbar_record = NULL;
@@ -508,6 +518,8 @@ void load_config_section_input(const char *name,const char *value) {
 		iobj->audio_device = value;
 	else if (!strcmp(name,"input device"))
 		iobj->input_device = value;
+	else if (!strcmp(name,"backend"))
+		iobj->backend = value;
 	else if (!strcmp(name,"input standard"))
 		iobj->input_standard = value;
 	else if (!strcmp(name,"capture fps"))
@@ -557,6 +569,9 @@ void load_config_section_input(const char *name,const char *value) {
 			if (*s == ',') s++;
 		}
 	}
+
+	if (iobj->backend.empty())
+		iobj->backend = "video4linux";
 }
 
 /* load configuration: section [xwindows] */
@@ -710,6 +725,7 @@ void save_configuration() {
 			fprintf(fp,"enable audio = %d\n",iobj->enable_audio?1:0);
 			fprintf(fp,"audio device = %s\n",iobj->audio_device.c_str());
 			fprintf(fp,"input device = %s\n",iobj->input_device.c_str());
+			fprintf(fp,"backend = %s\n",iobj->backend.c_str());
 			fprintf(fp,"input standard = %s\n",iobj->input_standard.c_str());
 			fprintf(fp,"capture fps = %.3f\n",iobj->capture_fps);
 			fprintf(fp,"capture width = %d\n",iobj->capture_width);
@@ -810,6 +826,7 @@ void update_ui_controls() {
 	/* no setting input settings for "No Input" */
 	gtk_widget_set_sensitive(GTK_WIDGET(main_window_audio_settings), CurrentInput > VIEW_INPUT_OFF);
 	gtk_widget_set_sensitive(GTK_WIDGET(main_window_input_settings), CurrentInput > VIEW_INPUT_OFF);
+	gtk_widget_set_sensitive(GTK_WIDGET(main_window_backend_settings), CurrentInput > VIEW_INPUT_OFF);
 
 	/* Play/Pause = Radio buttons. Only need to set active one and the others will deactivate */
 	if (CurrentInputObj()->Playing) {
@@ -853,6 +870,9 @@ void update_ui_inputs() {
 	x = gtk_radio_action_get_current_value (GTK_RADIO_ACTION(main_window_toolbar_input_action));
 	if (x != CurrentInput) gtk_radio_action_set_current_value (GTK_RADIO_ACTION(main_window_toolbar_input_action), CurrentInput);
 }
+
+static bool update_vars_from_backend_dialog();
+static void update_backend_dialog_from_vars();
 
 static bool update_vars_from_input_dialog();
 static void update_input_dialog_from_vars();
@@ -2078,6 +2098,7 @@ void switch_input(int x) {
 		CurrentInputObj()->onActivate(1);
 
 		/* and the audio dialog might want to update from the new input */
+		update_backend_dialog_from_vars();
 		update_audio_dialog_from_vars();
 		update_input_dialog_from_vars();
 
@@ -3028,6 +3049,23 @@ static gint v4l_standard_dropdown_populate_and_select(GtkWidget *listbox,GtkList
 	return active;
 }
 
+static gint v4l_backend_dropdown_populate_and_select(GtkWidget *listbox,GtkListStore *list) {
+	unsigned int index;
+	void **hints,**n;
+	GtkTreeIter iter;
+	gint active = -1;
+	char tmp[64];
+
+	active = 0;
+	for (index=0;backends[index];index++) {
+		gtk_list_store_append(list, &iter);
+		gtk_list_store_set(list, &iter, /*column*/0, (const char*)backends[index], -1);
+		if (CurrentInputObj()->backend == (const char*)backends[index]) active = index;
+	}
+
+	return active;
+}
+
 static gint v4l_input_dropdown_populate_and_select(GtkWidget *listbox,GtkListStore *list) {
 	void **hints,**n;
 	GtkTreeIter iter;
@@ -3262,9 +3300,75 @@ static void update_input_dialog_from_vars() {
 	gtk_combo_box_set_active (GTK_COMBO_BOX(input_dialog_vcrhack), active);
 }
 
+static void update_backend_dialog_from_vars() {
+	GtkTreeModel *model;
+	char tmp[1024];
+	gint active;
+
+	if (backend_dialog == NULL) return;
+
+	sprintf(tmp,"Input backend settings for %s",CurrentInputObj()->osd_name);
+	gtk_window_set_title (GTK_WINDOW(backend_dialog), tmp);
+
+	/* backend select */
+	model = gtk_combo_box_get_model (GTK_COMBO_BOX(backend_dialog_backend));
+	if (model != NULL) {
+		gtk_list_store_clear (GTK_LIST_STORE(model));
+		gtk_combo_box_set_model (GTK_COMBO_BOX(backend_dialog_backend), model);
+	}
+
+	model = GTK_TREE_MODEL(gtk_list_store_new (2, G_TYPE_STRING, G_TYPE_STRING));
+	assert(model != NULL);
+	active = v4l_backend_dropdown_populate_and_select (backend_dialog_backend, GTK_LIST_STORE(model));
+	gtk_combo_box_set_model (GTK_COMBO_BOX(backend_dialog_backend), model);
+
+	gtk_combo_box_set_active (GTK_COMBO_BOX(backend_dialog_backend), active);
+}
+
 static void update_x_dialog_from_vars() {
 	gtk_toggle_button_set_active (GTK_TOGGLE_BUTTON(x_dialog_shm), use_x_shm);
 	gtk_toggle_button_set_active (GTK_TOGGLE_BUTTON(x_dialog_xvideo), use_xvideo);
+}
+
+static bool update_vars_from_backend_dialog() {
+	bool tmp,do_reopen=false;
+	bool do_restart=false;
+	GtkTreeModel *model;
+	gint active;
+
+	if (backend_dialog == NULL) return false;
+
+	/* backend */
+	active = gtk_combo_box_get_active (GTK_COMBO_BOX(backend_dialog_backend));
+	model = gtk_combo_box_get_model (GTK_COMBO_BOX(backend_dialog_backend));
+
+	std::string old_backend = CurrentInputObj()->backend;
+
+	CurrentInputObj()->backend.clear();
+	if (model != NULL && active >= 0) {
+		GtkTreeIter iter;
+		char *str;
+		GValue v;
+
+		memset(&v,0,sizeof(v));
+		if (gtk_tree_model_iter_nth_child(model,&iter,NULL,active) == TRUE) {
+			gtk_tree_model_get_value(model,&iter,0,&v);
+			str = (char*)g_value_get_string(&v);
+			if (str) CurrentInputObj()->backend = str;
+			fprintf(stderr,"updated backend is '%s'\n",str);
+		}
+
+		g_value_unset(&v);
+	}
+
+	if (old_backend != CurrentInputObj()->backend)
+		do_reopen = true;
+
+	/* reopen */
+	if (do_reopen)
+		CurrentInputObj()->reopen_input();
+
+	return do_reopen;
 }
 
 static bool update_vars_from_input_dialog() {
@@ -3648,6 +3752,74 @@ static void on_input_dialog_delete(GtkAction *action, GtkWidget *window)
 {
 	gtk_widget_destroy(input_dialog);
 	input_dialog = NULL; /* GTKDialog is going to delete the widget regardless of what we do, so just fagheddaboutit */
+}
+
+static void on_backend_dialog_delete(GtkAction *action, GtkWidget *window)
+{
+	gtk_widget_destroy(backend_dialog);
+	backend_dialog = NULL; /* GTKDialog is going to delete the widget regardless of what we do, so just fagheddaboutit */
+}
+
+static void on_backend_dialog_response(GtkAction *action, gint response_id, gpointer user)
+{
+	/* FIXME: Uhhhh so okay, the "OK" button sends the "Apply" response? */
+	if (response_id == GTK_RESPONSE_OK || response_id == GTK_RESPONSE_APPLY) {
+		bool reopen;
+
+		reopen = update_vars_from_backend_dialog();
+		if (reopen) {
+			if (pthread_mutex_lock(&global_mutex) == 0) {
+				CurrentInputObj()->reopen_input();
+				pthread_mutex_unlock(&global_mutex);
+			}
+		}
+	}
+
+	gtk_widget_destroy(backend_dialog);
+	backend_dialog = NULL; /* GTKDialog is going to delete the widget regardless of what we do, so just fagheddaboutit */
+}
+
+void create_backend_dialog() {
+	GtkWidget *vbox,*hbox,*label,*icon;
+
+	assert(backend_dialog == NULL);
+
+	backend_dialog = gtk_dialog_new_with_buttons ("Input capture backend settings", GTK_WINDOW(main_window), GTK_DIALOG_DESTROY_WITH_PARENT, GTK_STOCK_OK, GTK_RESPONSE_APPLY, NULL);
+	gtk_window_set_icon(GTK_WINDOW(backend_dialog),application_icon_gdk_pixbuf);
+	gtk_window_set_resizable(GTK_WINDOW(backend_dialog), FALSE);
+
+	vbox = gtk_vbox_new (FALSE, 5);
+	gtk_box_pack_start (GTK_BOX(GTK_DIALOG(backend_dialog)->vbox), vbox, FALSE, FALSE, 0);
+	gtk_container_set_border_width (GTK_CONTAINER(vbox), 5);
+
+	/* backend select */
+	hbox = gtk_hbox_new (FALSE, 0);
+
+	backend_dialog_backend = gtk_combo_box_new ();
+	gtk_container_add (GTK_CONTAINER(hbox), backend_dialog_backend);
+
+	{
+		GtkCellRenderer *cell;
+
+		cell = gtk_cell_renderer_text_new();
+		gtk_cell_layout_pack_start(GTK_CELL_LAYOUT(backend_dialog_backend), cell, TRUE);
+		gtk_cell_layout_set_attributes(GTK_CELL_LAYOUT(backend_dialog_backend), cell, "text", 0, NULL);
+	}
+
+	gtk_container_add (GTK_CONTAINER(vbox), hbox);
+
+	/* done */
+	g_signal_connect(backend_dialog, "destroy",
+			G_CALLBACK(on_backend_dialog_delete),
+			NULL);
+	g_signal_connect(backend_dialog, "delete-event",
+			G_CALLBACK(on_backend_dialog_delete),
+			NULL);
+	g_signal_connect(backend_dialog, "response",
+			G_CALLBACK(on_backend_dialog_response),
+			NULL);
+
+	gtk_dialog_set_default_response (GTK_DIALOG(backend_dialog), GTK_RESPONSE_APPLY);
 }
 
 void create_input_dialog() {
@@ -4057,6 +4229,19 @@ static void on_configuration_input(GtkMenuItem *menuitem,gpointer user_data) {
 	gtk_widget_show_all(input_dialog);
 	gtk_window_present(GTK_WINDOW(input_dialog));
 	gtk_widget_grab_focus(input_dialog);
+}
+
+static void on_configuration_backend(GtkMenuItem *menuitem,gpointer user_data) {
+	if (backend_dialog == NULL) create_backend_dialog();
+	if (backend_dialog == NULL) {
+		g_error("Unable to initialize backend config window");
+		return;
+	}
+
+	update_backend_dialog_from_vars();
+	gtk_widget_show_all(backend_dialog);
+	gtk_window_present(GTK_WINDOW(backend_dialog));
+	gtk_widget_grab_focus(backend_dialog);
 }
 
 unsigned int client_area_adapicount = 0;
@@ -4807,6 +4992,10 @@ static GtkActionEntry gtk_all_actions[] = {
 		"<control><shift>X",	"Configure how this program communicates with your X Windows desktop",
 			G_CALLBACK (on_configuration_x)},
 
+	{"ConfigMenu_Backend",	NULL,			"_Input backend settings",
+		"<control><shift>B",	"Configure input capture backend associated with this input",
+			G_CALLBACK (on_configuration_backend)},
+
 	{"ConfigMenu_Audio",	NULL,			"_Audio capture settings",
 		"<control><shift>A",	"Configure audio capture associated with this input",
 			G_CALLBACK (on_configuration_audio)},
@@ -4876,6 +5065,8 @@ static const gchar *ui_info =
 "    </menu>"
 "    <menu action='ConfigMenu'>"
 "      <menuitem action='ConfigMenu_X'/>"
+"      <separator/>"
+"      <menuitem action='ConfigMenu_Backend'/>"
 "      <separator/>"
 "      <menuitem action='ConfigMenu_Audio'/>"
 "      <separator/>"
@@ -5425,6 +5616,10 @@ static int init_main_window()
 			xvideo_request_base,
 			xvideo_event_base,
 			xvideo_error_base);
+
+	/* backend settings */
+	tmp = gtk_ui_manager_get_widget (main_window_ui_mgr, "/MenuBar/ConfigMenu/ConfigMenu_Backend");
+	main_window_backend_settings = tmp;
 
 	/* audio settings */
 	tmp = gtk_ui_manager_get_widget (main_window_ui_mgr, "/MenuBar/ConfigMenu/ConfigMenu_Audio");
