@@ -273,6 +273,7 @@ GtkWidget*			input_dialog_capfps = NULL;
 GtkWidget*			input_dialog_codec = NULL;
 GtkWidget*			input_dialog_vcrhack = NULL;
 GtkWidget*			input_dialog_vbi_enable = NULL;
+GtkWidget*			input_dialog_video_index = NULL;
 GtkWidget*			input_dialog_def_crop = NULL;
 GtkWidget*			input_dialog_bounds_crop = NULL;
 GtkWidget*          		input_dialog_async_io = NULL;
@@ -521,6 +522,8 @@ void load_config_section_input(const char *name,const char *value) {
 		iobj->input_device = value;
 	else if (!strcmp(name,"backend"))
 		iobj->backend = value;
+	else if (!strcmp(name,"video index"))
+		iobj->video_index = atoi(value);
 	else if (!strcmp(name,"input standard"))
 		iobj->input_standard = value;
 	else if (!strcmp(name,"capture fps"))
@@ -727,6 +730,7 @@ void save_configuration() {
 			fprintf(fp,"audio device = %s\n",iobj->audio_device.c_str());
 			fprintf(fp,"input device = %s\n",iobj->input_device.c_str());
 			fprintf(fp,"backend = %s\n",iobj->backend.c_str());
+			fprintf(fp,"video index = %d\n",iobj->video_index);
 			fprintf(fp,"input standard = %s\n",iobj->input_standard.c_str());
 			fprintf(fp,"capture fps = %.3f\n",iobj->capture_fps);
 			fprintf(fp,"capture width = %d\n",iobj->capture_width);
@@ -3086,6 +3090,30 @@ static gint v4l_backend_dropdown_select() {
 	return active;
 }
 
+static gint v4l_video_index_dropdown_populate_and_select(GtkWidget *listbox,GtkListStore *list) {
+	unsigned int index;
+	void **hints,**n;
+	GtkTreeIter iter;
+	gint active = -1;
+	struct stat st;
+	int count = 0;
+	char tmp[64];
+
+	active = 0;
+	for (index=0;index < 64;index++) {
+		sprintf(tmp,"/dev/video%u",index);
+		if (stat(tmp,&st) == 0 && S_ISCHR(st.st_mode)) {
+			sprintf(tmp,"Card %u",index);
+			gtk_list_store_append(list, &iter);
+			gtk_list_store_set(list, &iter, /*column*/0, tmp, -1);
+			if (CurrentInputObj()->video_index == index) active = count;
+			count++;
+		}
+	}
+
+	return active;
+}
+
 static gint v4l_input_dropdown_populate_and_select(GtkWidget *listbox,GtkListStore *list) {
 	void **hints,**n;
 	GtkTreeIter iter;
@@ -3234,6 +3262,20 @@ static void update_input_dialog_from_vars() {
 	gtk_toggle_button_set_active (GTK_TOGGLE_BUTTON(input_dialog_async_io), CurrentInputObj()->async_io);
 	gtk_toggle_button_set_active (GTK_TOGGLE_BUTTON(input_dialog_swap_fields), CurrentInputObj()->swap_fields);
 	gtk_toggle_button_set_active (GTK_TOGGLE_BUTTON(input_dialog_jpeg_yuv), CurrentInputObj()->jpeg_yuv);
+
+	/* video index select */
+	model = gtk_combo_box_get_model (GTK_COMBO_BOX(input_dialog_video_index));
+	if (model != NULL) {
+		gtk_list_store_clear (GTK_LIST_STORE(model));
+		gtk_combo_box_set_model (GTK_COMBO_BOX(input_dialog_video_index), model);
+	}
+
+	model = GTK_TREE_MODEL(gtk_list_store_new (2, G_TYPE_STRING, G_TYPE_STRING));
+	assert(model != NULL);
+	active = v4l_video_index_dropdown_populate_and_select (input_dialog_video_index, GTK_LIST_STORE(model));
+	gtk_combo_box_set_model (GTK_COMBO_BOX(input_dialog_video_index), model);
+
+	gtk_combo_box_set_active (GTK_COMBO_BOX(input_dialog_video_index), active);
 
 	/* input select */
 	model = gtk_combo_box_get_model (GTK_COMBO_BOX(input_dialog_device));
@@ -3407,6 +3449,35 @@ static bool update_vars_from_input_dialog() {
 	tmp = gtk_toggle_button_get_active (GTK_TOGGLE_BUTTON(input_dialog_jpeg_yuv)) > 0;
 	if (tmp != CurrentInputObj()->jpeg_yuv) do_reopen = true;
 	CurrentInputObj()->jpeg_yuv = tmp;
+
+	/* video index */
+	active = gtk_combo_box_get_active (GTK_COMBO_BOX(input_dialog_video_index));
+	model = gtk_combo_box_get_model (GTK_COMBO_BOX(input_dialog_video_index));
+
+	int old_input_video_index = CurrentInputObj()->video_index;
+
+	CurrentInputObj()->video_index = -1;
+	if (model != NULL && active >= 0) {
+		GtkTreeIter iter;
+		char *str;
+		GValue v;
+
+		memset(&v,0,sizeof(v));
+		if (gtk_tree_model_iter_nth_child(model,&iter,NULL,active) == TRUE) {
+			gtk_tree_model_get_value(model,&iter,0,&v);
+			str = (char*)g_value_get_string(&v);
+			if (str) {
+				if (!strncmp(str,"Card ",5) && isdigit(str[5]))
+					CurrentInputObj()->video_index = atoi(str+5);
+			}
+			fprintf(stderr,"updated input video index is '%d'\n",CurrentInputObj()->input_device);
+		}
+
+		g_value_unset(&v);
+	}
+
+	if (old_input_video_index != CurrentInputObj()->video_index)
+		do_reopen = true;
 
 	/* input */
 	active = gtk_combo_box_get_active (GTK_COMBO_BOX(input_dialog_device));
@@ -3845,6 +3916,22 @@ void create_input_dialog() {
 	vbox = gtk_vbox_new (FALSE, 5);
 	gtk_box_pack_start (GTK_BOX(GTK_DIALOG(input_dialog)->vbox), vbox, FALSE, FALSE, 0);
 	gtk_container_set_border_width (GTK_CONTAINER(vbox), 5);
+
+	/* video index select */
+	hbox = gtk_hbox_new (FALSE, 0);
+
+	input_dialog_video_index = gtk_combo_box_new ();
+	gtk_container_add (GTK_CONTAINER(hbox), input_dialog_video_index);
+
+	{
+		GtkCellRenderer *cell;
+
+		cell = gtk_cell_renderer_text_new();
+		gtk_cell_layout_pack_start(GTK_CELL_LAYOUT(input_dialog_video_index), cell, TRUE);
+		gtk_cell_layout_set_attributes(GTK_CELL_LAYOUT(input_dialog_video_index), cell, "text", 0, NULL);
+	}
+
+	gtk_container_add (GTK_CONTAINER(vbox), hbox);
 
 	/* input select */
 	hbox = gtk_hbox_new (FALSE, 0);
