@@ -3066,6 +3066,18 @@ static gint v4l_backend_dropdown_populate_and_select(GtkWidget *listbox,GtkListS
 	return active;
 }
 
+static gint v4l_backend_dropdown_select() {
+	unsigned int index;
+	gint active = -1;
+
+	active = 0;
+	for (index=0;backends[index];index++) {
+		if (CurrentInputObj()->backend == (const char*)backends[index]) active = index;
+	}
+
+	return active;
+}
+
 static gint v4l_input_dropdown_populate_and_select(GtkWidget *listbox,GtkListStore *list) {
 	void **hints,**n;
 	GtkTreeIter iter;
@@ -3310,18 +3322,7 @@ static void update_backend_dialog_from_vars() {
 	sprintf(tmp,"Input backend settings for %s",CurrentInputObj()->osd_name);
 	gtk_window_set_title (GTK_WINDOW(backend_dialog), tmp);
 
-	/* backend select */
-	model = gtk_combo_box_get_model (GTK_COMBO_BOX(backend_dialog_backend));
-	if (model != NULL) {
-		gtk_list_store_clear (GTK_LIST_STORE(model));
-		gtk_combo_box_set_model (GTK_COMBO_BOX(backend_dialog_backend), model);
-	}
-
-	model = GTK_TREE_MODEL(gtk_list_store_new (2, G_TYPE_STRING, G_TYPE_STRING));
-	assert(model != NULL);
-	active = v4l_backend_dropdown_populate_and_select (backend_dialog_backend, GTK_LIST_STORE(model));
-	gtk_combo_box_set_model (GTK_COMBO_BOX(backend_dialog_backend), model);
-
+	active = v4l_backend_dropdown_select ();
 	gtk_combo_box_set_active (GTK_COMBO_BOX(backend_dialog_backend), active);
 }
 
@@ -3781,6 +3782,8 @@ static void on_backend_dialog_response(GtkAction *action, gint response_id, gpoi
 
 void create_backend_dialog() {
 	GtkWidget *vbox,*hbox,*label,*icon;
+	GtkTreeModel *model;
+	gint active;
 
 	assert(backend_dialog == NULL);
 
@@ -3805,6 +3808,11 @@ void create_backend_dialog() {
 		gtk_cell_layout_pack_start(GTK_CELL_LAYOUT(backend_dialog_backend), cell, TRUE);
 		gtk_cell_layout_set_attributes(GTK_CELL_LAYOUT(backend_dialog_backend), cell, "text", 0, NULL);
 	}
+
+	model = GTK_TREE_MODEL(gtk_list_store_new (2, G_TYPE_STRING, G_TYPE_STRING));
+	assert(model != NULL);
+	active = v4l_backend_dropdown_populate_and_select (backend_dialog_backend, GTK_LIST_STORE(model));
+	gtk_combo_box_set_model (GTK_COMBO_BOX(backend_dialog_backend), model);
 
 	gtk_container_add (GTK_CONTAINER(vbox), hbox);
 
