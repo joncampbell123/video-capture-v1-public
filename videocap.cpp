@@ -3930,6 +3930,32 @@ void create_backend_dialog() {
 	gtk_dialog_set_default_response (GTK_DIALOG(backend_dialog), GTK_RESPONSE_APPLY);
 }
 
+void on_input_dialog_video_index_change(GtkComboBox *widget,gpointer user_data) {
+	/* hack! */
+	const int oldindex = CurrentInputObj()->video_index;
+	GtkTreeModel *model;
+	gint active;
+
+	fprintf(stderr,"On change\n");
+
+	CurrentInputObj()->video_index = gtk_combo_box_get_active (GTK_COMBO_BOX(input_dialog_video_index));
+
+	model = gtk_combo_box_get_model (GTK_COMBO_BOX(input_dialog_device));
+	if (model != NULL) {
+		gtk_list_store_clear (GTK_LIST_STORE(model));
+		gtk_combo_box_set_model (GTK_COMBO_BOX(input_dialog_device), model);
+	}
+
+	model = GTK_TREE_MODEL(gtk_list_store_new (2, G_TYPE_STRING, G_TYPE_STRING));
+	assert(model != NULL);
+	active = v4l_input_dropdown_populate_and_select (input_dialog_device, GTK_LIST_STORE(model));
+	gtk_combo_box_set_model (GTK_COMBO_BOX(input_dialog_device), model);
+
+	gtk_combo_box_set_active (GTK_COMBO_BOX(input_dialog_device), active);
+
+	CurrentInputObj()->video_index = oldindex;
+}
+
 void create_input_dialog() {
 	GtkWidget *vbox,*hbox,*label,*icon;
 
@@ -3948,6 +3974,9 @@ void create_input_dialog() {
 
 	input_dialog_video_index = gtk_combo_box_new ();
 	gtk_container_add (GTK_CONTAINER(hbox), input_dialog_video_index);
+	g_signal_connect(input_dialog_video_index, "changed",
+		G_CALLBACK(on_input_dialog_video_index_change),
+		NULL);
 
 	{
 		GtkCellRenderer *cell;
