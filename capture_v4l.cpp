@@ -2119,6 +2119,16 @@ fail:
 	return 1;
 }
 
+void copy_grey_to_planar_y(unsigned char *framep[3],int stride[3],unsigned char *sdi) {
+	if (framep[0]) {
+		unsigned int y;
+		for (y=0;y < v4l_height;y++)
+			memcpy(framep[0]+(y*stride[0]),sdi+(y*v4l_width),v4l_width);
+	}
+	if (framep[1]) memset(framep[1],128,stride[1] * (v4l_height>>v4l_codec_yshr));
+	if (framep[2]) memset(framep[2],128,stride[2] * (v4l_height>>v4l_codec_yshr));
+}
+
 void copy_yuyv_to_planar_yuv_422(unsigned char *framep[3],int stride[3],unsigned char *sdi) {
 	unsigned int render_height = v4l_height & (~7);
 	unsigned int srcs = v4l_width*2;
@@ -2660,7 +2670,12 @@ int main(int argc,char **argv) {
 					av_frame->linesize[2] = v4l_width_stride >> 1;
 					assert((av_frame->data[2] + (av_frame->linesize[2]*(v4l_height>>v4l_codec_yshr))) <= (live_shm + live_shm_size));
 
-					if (v4l_codec_yshr == 0) {
+					if (v4l_fmt.fmt.pix.pixelformat == V4L2_PIX_FMT_GREY) {
+						/* A curious grayscale capture mode of the webcam in my laptop that causes red LEDs to flash.
+						 * Video capture with depth? */
+						copy_grey_to_planar_y(av_frame->data,av_frame->linesize,ptr);
+					}
+					else if (v4l_codec_yshr == 0) {
 						if (v4l_fmt.fmt.pix.pixelformat == V4L2_PIX_FMT_YUYV)
 							copy_yuyv_to_planar_yuv_422(av_frame->data,av_frame->linesize,ptr);
 						else if (v4l_fmt.fmt.pix.pixelformat == V4L2_PIX_FMT_UYVY)
