@@ -3097,13 +3097,39 @@ static gint v4l_video_index_dropdown_populate_and_select(GtkWidget *listbox,GtkL
 	gint active = -1;
 	struct stat st;
 	int count = 0;
-	char tmp[64];
+	char tmp[512];
 
 	active = 0;
 	for (index=0;index < 64;index++) {
 		sprintf(tmp,"/dev/video%u",index);
 		if (stat(tmp,&st) == 0 && S_ISCHR(st.st_mode)) {
-			sprintf(tmp,"Card %u",index);
+			std::string name = "unknown";
+
+			{
+				int fd = open(tmp,O_RDONLY);
+				if (fd >= 0) {
+					struct v4l2_capability c;
+
+					memset(&c,0,sizeof(c));
+					if (ioctl(fd,VIDIOC_QUERYCAP,&c) >= 0) {
+						fprintf(stderr,"'%s' '%s' '%s'\n",c.driver,c.card,c.bus_info);
+						name = (char*)c.driver;
+						if (c.card[0]) {
+							name += " '";
+							name += (char*)c.card;
+							name += "'";
+						}
+						if (c.bus_info[0]) {
+							name += " ";
+							name += (char*)c.bus_info;
+						}
+					}
+
+					close(fd);
+				}
+			}
+
+			snprintf(tmp,sizeof(tmp),"Card %u (%s)",index,name.c_str());
 			gtk_list_store_append(list, &iter);
 			gtk_list_store_set(list, &iter, /*column*/0, tmp, -1);
 			if (CurrentInputObj()->video_index == index) active = count;
