@@ -3496,7 +3496,7 @@ static bool update_vars_from_input_dialog() {
 				if (!strncmp(str,"Card ",5) && isdigit(str[5]))
 					CurrentInputObj()->video_index = atoi(str+5);
 			}
-			fprintf(stderr,"updated input video index is '%d'\n",CurrentInputObj()->input_device);
+			fprintf(stderr,"updated input video index is '%d'\n",CurrentInputObj()->input_device.c_str());
 		}
 
 		g_value_unset(&v);
