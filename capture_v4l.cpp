@@ -2581,6 +2581,10 @@ int main(int argc,char **argv) {
 			unsigned char *ptr = NULL;
 			double framt = -1.0;
 
+			memset(&v4l_buf[v4l_bufptr],0,sizeof(v4l_buf[v4l_bufptr]));
+			v4l_buf[v4l_bufptr].index = v4l_bufptr;
+			v4l_buf[v4l_bufptr].type = V4L2_BUF_TYPE_VIDEO_CAPTURE;
+			v4l_buf[v4l_bufptr].memory = V4L2_MEMORY_MMAP;
 			if (ioctl(v4l_fd,VIDIOC_QUERYBUF,&v4l_buf[v4l_bufptr]) == 0) {
 				if (v4l_buf[v4l_bufptr].flags & V4L2_BUF_FLAG_DONE) {
 					if (ioctl(v4l_fd,VIDIOC_DQBUF,&v4l_buf[v4l_bufptr]) == 0) {
