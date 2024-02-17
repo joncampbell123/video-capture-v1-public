@@ -2477,6 +2477,51 @@ void process_socket_io() {
 	}
 }
 
+uint32_t scribble_marker = 0;
+
+bool scribble_mark_detect(unsigned int stride,unsigned int height,unsigned char *ptr) {
+	unsigned int found = 0;
+	unsigned int y;
+
+	if (stride < (4*5)) return false;
+	if (scribble_marker == 0) return false;
+
+	unsigned int so = (stride - (4*5)) / 2;
+
+	for (y=0;y < height;y++) {
+		if (	((uint32_t*)(ptr+so))[0] == 0xFFFFFFFF &&
+			((uint32_t*)(ptr+so))[1] == 0x00000000 &&
+			((uint32_t*)(ptr+so))[2] == scribble_marker &&
+			((uint32_t*)(ptr+so))[3] == ~scribble_marker &&
+			((uint32_t*)(ptr+so))[4] == 0xADADADAD) {
+			found++;
+		}
+		ptr += stride;
+	}
+
+	return found >= ((height*7)/8);
+}
+
+void scribble_mark_frame(unsigned int stride,unsigned int height,unsigned char *ptr) {
+	unsigned int y;
+
+	if (scribble_marker == 0) scribble_marker = (uint32_t)rand() * (uint32_t)rand();
+	if (stride < (4*5)) return;
+
+	unsigned int so = (stride - (4*5)) / 2;
+
+	for (y=0;y < height;y++) {
+		/* put it right down the middle of the frame using a pattern very unlikely to appear in video capture.
+		 * furthermore the random nature of the mark makes it very unlikely. */
+		((uint32_t*)(ptr+so))[0] = 0xFFFFFFFF;
+		((uint32_t*)(ptr+so))[1] = 0x00000000;
+		((uint32_t*)(ptr+so))[2] = scribble_marker;
+		((uint32_t*)(ptr+so))[3] = ~scribble_marker;
+		((uint32_t*)(ptr+so))[4] = 0xADADADAD;
+		ptr += stride;
+	}
+}
+
 int main(int argc,char **argv) {
 	/* sync */
 	signed long long audio_drift = 0;
@@ -2642,6 +2687,13 @@ int main(int argc,char **argv) {
 			}
 
 			if (ptr != NULL) {
+				bool ignore_frame = false;
+
+				if (scribble_mark_detect(v4l_width_stride,v4l_height,ptr)) {
+					fprintf(stderr,"Duplicate frame returned by capture card, ignoring\n");
+					ignore_frame = true;
+				}
+
 				AVFrame *av_frame = av_frame_alloc();
 
 				av_frame->top_field_first = 1;//(v4l_interlaced == 0); FIXME!
@@ -2654,7 +2706,9 @@ int main(int argc,char **argv) {
 				if (fmp4_context != NULL)
 					av_frame->format = fmp4_context->pix_fmt;
 
-				if (v4l_fd >= 0 && live_shm != NULL) {
+				if (ignore_frame) {
+				}
+				else if (v4l_fd >= 0 && live_shm != NULL) {
 					volatile struct live_shm_header *xx = live_shm_head();
 					assert(xx->header == LIVE_SHM_HEADER);
 					assert(xx->width != 0);
@@ -2743,7 +2797,7 @@ int main(int argc,char **argv) {
 					}
 				}
 
-				if (AVI) {
+				if (AVI && !ignore_frame) {
 					if (AVI_video) {
 						AVPacket *pkt;
 						int gotit=0;
@@ -2760,24 +2814,24 @@ int main(int argc,char **argv) {
 									avi_frame_counter++;
 								}
 							}
-                            else if (avi_frame_counter > (n+3ull)) {
-                                /* My Mirabox HDMI capture card seems to have a weird problem with 1080p60
-                                 * where it allows 60fps capture but it seems to send frames at like 61fps.
-                                 * The distance between avi_frame_counter and n slowly grows ever larger and
-                                 * manifests itself as a slow loss of A/V sync in the capture, often to about
-                                 * 3-6 seconds of A/V sync error within 1-2 minutes. It doesn't do this if you
-                                 * capture a 1080p60 source at 30fps nor does it do this with a 1080p60 source
-                                 * captured as 720p60. Weird. */
-                                double adj = ((double)(avi_frame_counter-(n+3ull)) * v4l_framerate_d) / v4l_framerate_n;
-                                if (adj > 0.25) adj = 0.25;
+							else if (avi_frame_counter > (n+3ull)) {
+								/* My Mirabox HDMI capture card seems to have a weird problem with 1080p60
+								 * where it allows 60fps capture but it seems to send frames at like 61fps.
+								 * The distance between avi_frame_counter and n slowly grows ever larger and
+								 * manifests itself as a slow loss of A/V sync in the capture, often to about
+								 * 3-6 seconds of A/V sync error within 1-2 minutes. It doesn't do this if you
+								 * capture a 1080p60 source at 30fps nor does it do this with a 1080p60 source
+								 * captured as 720p60. Weird. */
+								double adj = ((double)(avi_frame_counter-(n+3ull)) * v4l_framerate_d) / v4l_framerate_n;
+								if (adj > 0.25) adj = 0.25;
 
-                                fprintf(stderr,"avi_frame_counter exceeds source frame time (%llu > %llu) source must be sending a little fast (adj=%.3f)\n",
-                                    avi_frame_counter,n,adj);
+								fprintf(stderr,"avi_frame_counter exceeds source frame time (%llu > %llu) source must be sending a little fast (adj=%.3f)\n",
+										avi_frame_counter,n,adj);
 
-                                avi_file_start_monotime -= adj;
-                                avi_file_start_time -= adj;
-                                v4l_basetime -= adj;
-                            }
+								avi_file_start_monotime -= adj;
+								avi_file_start_time -= adj;
+								v4l_basetime -= adj;
+							}
 						}
 
 						v4l_last_frame_delta = avi_frame_counter - v4l_last_frame;
@@ -2841,7 +2895,7 @@ int main(int argc,char **argv) {
 					}
 				}
 
-				if (async_io && AVI != NULL && AVI_video != NULL) {
+				if (async_io && AVI != NULL && AVI_video != NULL && !ignore_frame) {
 					async_avi_queue_lock();
 
 					while (v4l_video_async_track < AVI_video->sample_write_chunk) {
@@ -2859,6 +2913,11 @@ int main(int argc,char **argv) {
 
 					async_avi_queue_unlock();
 				}
+
+				/* I'm seeing problems with capture cards returning frames where nothing changed.
+				 * To detect that, scribble on the frame before queueing the buffer and see if
+				 * the marks come back unchanged. */
+				scribble_mark_frame(v4l_width_stride,v4l_height,ptr);
 
 				vb->timestamp.tv_sec = 0;
 				vb->timestamp.tv_usec = 0;
