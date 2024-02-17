@@ -2689,7 +2689,7 @@ int main(int argc,char **argv) {
 			if (ptr != NULL) {
 				bool ignore_frame = false;
 
-				if (scribble_mark_detect(v4l_width_stride,v4l_height,ptr)) {
+				if (scribble_mark_detect(v4l_stride,v4l_height,ptr)) {
 					fprintf(stderr,"Duplicate frame returned by capture card, ignoring\n");
 					ignore_frame = true;
 				}
@@ -2917,7 +2917,7 @@ int main(int argc,char **argv) {
 				/* I'm seeing problems with capture cards returning frames where nothing changed.
 				 * To detect that, scribble on the frame before queueing the buffer and see if
 				 * the marks come back unchanged. */
-				scribble_mark_frame(v4l_width_stride,v4l_height,ptr);
+				scribble_mark_frame(v4l_stride,v4l_height,ptr);
 
 				vb->timestamp.tv_sec = 0;
 				vb->timestamp.tv_usec = 0;
