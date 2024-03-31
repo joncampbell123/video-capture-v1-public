@@ -258,6 +258,7 @@ static int			v4l_width = 720,v4l_height = 480;
 static double       want_fps = -1;
 static int			want_width = -1,want_height = -1;
 static int			v4l_framerate_n = 30000,v4l_framerate_d = 1001;
+static int			v4l_force_interlaced = -2;
 static int			v4l_interlaced = 0;
 static int			v4l_interlaced_woven = 0;
 static int			v4l_framesize = 0;
@@ -1148,6 +1149,8 @@ static void help() {
     fprintf(stderr,"    -no-vbi-sysfs                          Don't use sysfs to find vbi device\n");
     fprintf(stderr,"    -fps <n>                               Capture fps\n");
     fprintf(stderr,"    -jpeg-yuv                              YUV is JPEG scale (0-255), else broadcast (16-235)\n");
+    fprintf(stderr,"    -swap-fields                           Swap fields, broken capture cards\n");
+    fprintf(stderr,"    -fil <top|bottom|p>                    Force field order in case the capture card fails to report it properly\n");
 }
 
 static int parse_argv(int argc,char **argv) {
@@ -1164,6 +1167,18 @@ static int parse_argv(int argc,char **argv) {
 				help();
 				return 1;
 			}
+            else if (!strcmp(a,"fil")) {
+                a = argv[i++];
+                if (a == NULL) return 1;
+                /* force interlacing if the capture card for some reason fails to report interlacing
+                 * (looking at you, Linux Happauage PCI-e capture card drivers!) */
+                if (!strcmp(a,"top"))
+                    v4l_force_interlaced = 0;
+                else if (!strcmp(a,"bottom"))
+                    v4l_force_interlaced = 1;
+                else if (!strcmp(a,"p"))
+                    v4l_force_interlaced = -1;
+            }
             else if (!strcmp(a,"jpeg-yuv")) {
                 jpeg_yuv = true;
             }
@@ -2676,6 +2691,9 @@ int main(int argc,char **argv) {
 							{ v4l_interlaced = 1; v4l_interlaced_woven = 1; }
 						else
 							v4l_interlaced = -1;
+
+						if (v4l_force_interlaced >= -1)
+							v4l_interlaced = v4l_force_interlaced;
 					}
 					else {
 						fprintf(stderr,"Cannot dq buf %u\n",v4l_bufptr);
@@ -2696,7 +2714,7 @@ int main(int argc,char **argv) {
 
 				AVFrame *av_frame = av_frame_alloc();
 
-				av_frame->top_field_first = 1;//(v4l_interlaced == 0); FIXME!
+				av_frame->top_field_first = (v4l_interlaced == 0) ? 1 : 0;
 				av_frame->interlaced_frame = (v4l_interlaced >= 0);
 				av_frame->key_frame = (avi_frame_counter % AVI_FRAMES_PER_GROUP) == 0;
 				av_frame->pts = AV_NOPTS_VALUE;
