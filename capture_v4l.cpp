@@ -272,6 +272,13 @@ static struct v4l2_buffer	v4l_buf[30];
 static unsigned char*		v4l_ptr[30]={NULL};
 static double			v4l_basetime = -1;
 
+static int effective_v4l_interlaced(void) {
+    if (v4l_force_interlaced >= -1)
+        return v4l_force_interlaced;
+    else
+        return v4l_interlaced;
+}
+
 static struct v4l2_capability	v4l_caps;
 static struct v4l2_format	v4l_fmt;
 
@@ -655,7 +662,7 @@ static void open_avi_file() {
 	fmp4_context->thread_type |= FF_THREAD_FRAME;
 //	fmp4_context->flags2 |= CODEC_FLAG2_FAST;
 //	fmp4_context->flags |= CODEC_FLAG_LOW_DELAY;
-	if (v4l_interlaced >= 0) fmp4_context->flags |= AV_CODEC_FLAG_INTERLACED_DCT;
+	if (effective_v4l_interlaced() >= 0) fmp4_context->flags |= AV_CODEC_FLAG_INTERLACED_DCT;
 
 	fprintf(stderr,"Encoder using %u threads\n",how_many_cpus());
 
@@ -1772,7 +1779,7 @@ int open_v4l() {
 				v4l_fmt.fmt.pix.height = final_height;
 				v4l_fmt.fmt.pix.pixelformat = tf[i];
 #if 1
-				if (v4l_interlaced >= 0)
+				if (effective_v4l_interlaced() >= 0)
 					v4l_fmt.fmt.pix.field = V4L2_FIELD_INTERLACED;
 				else
 					v4l_fmt.fmt.pix.field = V4L2_FIELD_NONE;
@@ -2691,9 +2698,6 @@ int main(int argc,char **argv) {
 							{ v4l_interlaced = 1; v4l_interlaced_woven = 1; }
 						else
 							v4l_interlaced = -1;
-
-						if (v4l_force_interlaced >= -1)
-							v4l_interlaced = v4l_force_interlaced;
 					}
 					else {
 						fprintf(stderr,"Cannot dq buf %u\n",v4l_bufptr);
@@ -2714,8 +2718,8 @@ int main(int argc,char **argv) {
 
 				AVFrame *av_frame = av_frame_alloc();
 
-				av_frame->top_field_first = (v4l_interlaced == 0) ? 1 : 0;
-				av_frame->interlaced_frame = (v4l_interlaced >= 0);
+				av_frame->top_field_first = (effective_v4l_interlaced() == 0) ? 1 : 0;
+				av_frame->interlaced_frame = (effective_v4l_interlaced() >= 0);
 				av_frame->key_frame = (avi_frame_counter % AVI_FRAMES_PER_GROUP) == 0;
 				av_frame->pts = AV_NOPTS_VALUE;
 				av_frame->width = v4l_width;
@@ -2787,7 +2791,7 @@ int main(int argc,char **argv) {
 					}
 					xx->map[xx->in].offset = (uint32_t)((size_t)av_frame->data[0] - (size_t)live_shm);
 					xx->map[xx->in].generation = xx->this_generation;
-					xx->map[xx->in].field_order = v4l_interlaced + 1;
+					xx->map[xx->in].field_order = effective_v4l_interlaced() + 1;
 					if ((++xx->in) == xx->slots) {
 						xx->this_generation++;
 						xx->in = 0;
