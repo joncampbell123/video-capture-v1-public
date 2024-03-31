@@ -225,6 +225,7 @@ public:
 	bool				crop_bounds;
 	bool				crop_defrect;
 	bool				swap_fields;
+    int				    force_interlace = -2;
 	bool				jpeg_yuv;
 	bool				async_io;
 	int				crop_left,crop_top,crop_width,crop_height;
@@ -272,6 +273,7 @@ GtkWidget*			input_dialog_capres = NULL;
 GtkWidget*			input_dialog_capfps = NULL;
 GtkWidget*			input_dialog_codec = NULL;
 GtkWidget*			input_dialog_vcrhack = NULL;
+GtkWidget*			input_dialog_force_interlace = NULL;
 GtkWidget*			input_dialog_vbi_enable = NULL;
 GtkWidget*			input_dialog_video_index = NULL;
 GtkWidget*			input_dialog_def_crop = NULL;
@@ -540,6 +542,8 @@ void load_config_section_input(const char *name,const char *value) {
 		iobj->async_io = atoi(value) > 0;
 	else if (!strcmp(name,"swap fields"))
 		iobj->swap_fields = atoi(value) > 0;
+	else if (!strcmp(name,"force interlace"))
+		iobj->force_interlace = atoi(value);
 	else if (!strcmp(name,"jpeg yuv"))
 		iobj->jpeg_yuv = atoi(value) > 0;
     else if (!strcmp(name,"zebra"))
@@ -736,6 +740,7 @@ void save_configuration() {
 			fprintf(fp,"capture width = %d\n",iobj->capture_width);
 			fprintf(fp,"capture height = %d\n",iobj->capture_height);
 			fprintf(fp,"vcr hack = %s\n",iobj->vcrhack.c_str());
+            fprintf(fp,"force interlace = %d\n",iobj->force_interlace);
             fprintf(fp,"swap fields = %d\n",iobj->swap_fields);
             fprintf(fp,"jpeg yuv = %d\n",iobj->jpeg_yuv);
 			fprintf(fp,"async io = %d\n",iobj->async_io);
@@ -2280,6 +2285,16 @@ bool InputManager::start_process_video4linux() {
 		argv[argc++] = vcrhack.c_str();
 	}
 
+	if (force_interlace >= -1) {
+		argv[argc++] = "--fil";
+		if (force_interlace == -1)
+			argv[argc++] = "p";
+		else if (force_interlace == 0)
+			argv[argc++] = "top";
+		else if (force_interlace == 1)
+			argv[argc++] = "bottom";
+	}
+
 	if (!input_codec.empty()) {
 		argv[argc++] = "--codec";
 		argv[argc++] = input_codec.c_str();
@@ -2892,6 +2907,30 @@ static gint v4l_vcrhack_dropdown_populate_and_select(GtkWidget *listbox,GtkListS
 	return active;
 }
 
+static gint v4l_force_interlace_dropdown_populate_and_select(GtkWidget *listbox,GtkListStore *list) {
+	static const char *modelist[] = {
+		"Progressive",
+		"Top field first",
+		"Bottom field first",
+		NULL
+	};
+	void **hints,**n;
+	GtkTreeIter iter;
+	gint active = -2;
+	int index;
+
+	gtk_list_store_append(list, &iter);
+	gtk_list_store_set(list, &iter, /*column*/0, "", -1);
+
+	for (index=0;modelist[index] != NULL;index++) {
+		gtk_list_store_append(list, &iter);
+		gtk_list_store_set(list, &iter, /*column*/0, modelist[index], -1);
+		if ((index-1) == CurrentInputObj()->force_interlace) active = index+1;
+	}
+
+	return active;
+}
+
 static gint v4l_codec_dropdown_populate_and_select(GtkWidget *listbox,GtkListStore *list) {
 	static const char *modelist[] = {
         "mpeg2",
@@ -3386,6 +3425,21 @@ static void update_input_dialog_from_vars() {
 	gtk_combo_box_set_model (GTK_COMBO_BOX(input_dialog_vcrhack), model);
 
 	gtk_combo_box_set_active (GTK_COMBO_BOX(input_dialog_vcrhack), active);
+
+	/* force interlace */
+	model = gtk_combo_box_get_model (GTK_COMBO_BOX(input_dialog_force_interlace));
+	if (model != NULL) {
+		gtk_list_store_clear (GTK_LIST_STORE(model));
+		gtk_combo_box_set_model (GTK_COMBO_BOX(input_dialog_force_interlace), model);
+	}
+
+	model = GTK_TREE_MODEL(gtk_list_store_new (2, G_TYPE_STRING, G_TYPE_STRING));
+	assert(model != NULL);
+	active = v4l_force_interlace_dropdown_populate_and_select (input_dialog_force_interlace, GTK_LIST_STORE(model));
+	gtk_combo_box_set_model (GTK_COMBO_BOX(input_dialog_force_interlace), model);
+
+	gtk_combo_box_set_active (GTK_COMBO_BOX(input_dialog_force_interlace), active);
+
 }
 
 static void update_backend_dialog_from_vars() {
@@ -3667,6 +3721,20 @@ static bool update_vars_from_input_dialog() {
 	}
 
 	if (old_vcrhack != CurrentInputObj()->vcrhack)
+		do_reopen = true;
+
+	/* force interlace */
+	active = gtk_combo_box_get_active (GTK_COMBO_BOX(input_dialog_force_interlace));
+	model = gtk_combo_box_get_model (GTK_COMBO_BOX(input_dialog_force_interlace));
+
+	int old_force_interlace = CurrentInputObj()->force_interlace;
+
+	CurrentInputObj()->force_interlace = -2;
+	if (model != NULL && active >= 0) {
+		CurrentInputObj()->force_interlace = active-2;
+	}
+
+	if (old_force_interlace != CurrentInputObj()->force_interlace)
 		do_reopen = true;
 
 	return do_reopen;
@@ -4080,6 +4148,22 @@ void create_input_dialog() {
 		cell = gtk_cell_renderer_text_new();
 		gtk_cell_layout_pack_start(GTK_CELL_LAYOUT(input_dialog_vcrhack), cell, TRUE);
 		gtk_cell_layout_set_attributes(GTK_CELL_LAYOUT(input_dialog_vcrhack), cell, "text", 0, NULL);
+	}
+
+	gtk_container_add (GTK_CONTAINER(vbox), hbox);
+
+	/* force interlace */
+	hbox = gtk_hbox_new (FALSE, 0);
+
+	input_dialog_force_interlace = gtk_combo_box_new ();
+	gtk_container_add (GTK_CONTAINER(hbox), input_dialog_force_interlace);
+
+	{
+		GtkCellRenderer *cell;
+
+		cell = gtk_cell_renderer_text_new();
+		gtk_cell_layout_pack_start(GTK_CELL_LAYOUT(input_dialog_force_interlace), cell, TRUE);
+		gtk_cell_layout_set_attributes(GTK_CELL_LAYOUT(input_dialog_force_interlace), cell, "text", 0, NULL);
 	}
 
 	gtk_container_add (GTK_CONTAINER(vbox), hbox);
