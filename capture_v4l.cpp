@@ -2118,7 +2118,10 @@ int open_v4l() {
 
 	if (v4l_fd >= 0 && live_shm != NULL) {
 		volatile struct live_shm_header *xx = live_shm_head();
+
 		xx->header = LIVE_SHM_HEADER_UPDATING;
+		asm volatile("" ::: "memory"); // complete writes FIRST before proceeding
+
 		xx->width = v4l_width;
 		xx->height = v4l_height;
 		xx->stride = v4l_width_stride;
@@ -2128,12 +2131,16 @@ int open_v4l() {
 		xx->frame_size = (v4l_width_stride * v4l_height) + ((v4l_width_stride>>1) * (v4l_height>>v4l_codec_yshr) * 2);
 		xx->in = 0;
 		xx->slots = (live_shm_size - sizeof(*xx)) / xx->frame_size;
-		xx->header = LIVE_SHM_HEADER;
 
 		if (v4l_codec_yshr == 0)
 			xx->color_fmt = LIVE_COLOR_FMT_YUV422;	
 		else
 			xx->color_fmt = LIVE_COLOR_FMT_YUV420;
+
+		asm volatile("" ::: "memory"); // complete writes FIRST before proceeding
+
+		xx->header = LIVE_SHM_HEADER;
+		asm volatile("" ::: "memory"); // complete writes FIRST before proceeding
 	}
 
 	if (auto_v4l_avi && v4l_fd >= 0) open_avi_file();
