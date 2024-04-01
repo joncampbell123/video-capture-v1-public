@@ -3199,9 +3199,11 @@ static gint v4l_video_index_dropdown_populate_and_select(GtkWidget *listbox,GtkL
 							else if (c.device_caps & V4L2_CAP_VBI_OUTPUT) {
 								typ = "VBI output";
 							}
+#ifdef V4L2_CAP_META_CAPTURE // some older kernels don't have this
 							else if (c.device_caps & V4L2_CAP_META_CAPTURE) {
 								typ = "metadata capture"; // uvcvideo loves to make these extra device nodes
 							}
+#endif
 						}
 
 						fprintf(stderr,"'%s' '%s' '%s' %s\n",c.driver,c.card,c.bus_info,typ.c_str());
