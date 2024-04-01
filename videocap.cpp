@@ -3143,6 +3143,7 @@ static gint v4l_video_index_dropdown_populate_and_select(GtkWidget *listbox,GtkL
 		sprintf(tmp,"/dev/video%u",index);
 		if (stat(tmp,&st) == 0 && S_ISCHR(st.st_mode)) {
 			std::string name = "unknown";
+			std::string typ = "capture";
 
 			{
 				int fd = open(tmp,O_RDONLY);
@@ -3151,7 +3152,29 @@ static gint v4l_video_index_dropdown_populate_and_select(GtkWidget *listbox,GtkL
 
 					memset(&c,0,sizeof(c));
 					if (ioctl(fd,VIDIOC_QUERYCAP,&c) >= 0) {
-						fprintf(stderr,"'%s' '%s' '%s'\n",c.driver,c.card,c.bus_info);
+						/* List only CAPTURE devices.
+						 * Do not list OUTPUT devices.
+						 * For uvcvideo USB webcams, this also filters out those extra "metadata capture" devices */
+						if (c.capabilities & V4L2_CAP_DEVICE_CAPS) {
+							typ = "?";
+							if (c.device_caps & V4L2_CAP_VIDEO_CAPTURE) {
+								typ = "capture";
+							}
+							else if (c.device_caps & V4L2_CAP_VIDEO_OUTPUT) {
+								typ = "output";
+							}
+							else if (c.device_caps & V4L2_CAP_VBI_CAPTURE) {
+								typ = "VBI capture";
+							}
+							else if (c.device_caps & V4L2_CAP_VBI_OUTPUT) {
+								typ = "VBI output";
+							}
+							else if (c.device_caps & V4L2_CAP_META_CAPTURE) {
+								typ = "metadata capture"; // uvcvideo loves to make these extra device nodes
+							}
+						}
+
+						fprintf(stderr,"'%s' '%s' '%s' %s\n",c.driver,c.card,c.bus_info,typ.c_str());
 						name = (char*)c.driver;
 						if (c.card[0]) {
 							name += " '";
@@ -3168,7 +3191,7 @@ static gint v4l_video_index_dropdown_populate_and_select(GtkWidget *listbox,GtkL
 				}
 			}
 
-			snprintf(tmp,sizeof(tmp),"Card %u (%s)",index,name.c_str());
+			snprintf(tmp,sizeof(tmp),"Card %u (%s) %s",index,name.c_str(),typ.c_str());
 			gtk_list_store_append(list, &iter);
 			gtk_list_store_set(list, &iter, /*column*/0, tmp, -1);
 			if (CurrentInputObj()->video_index == index) active = count;
