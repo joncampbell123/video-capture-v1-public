@@ -558,13 +558,13 @@ static void open_avi_file() {
     if (codec_id == AV_CODEC_ID_H265) {
         if (v4l_height >= 720) {
             if (v4l_codec_yshr == 0)
-                fmp4_context->bit_rate = 25000000;
+                fmp4_context->bit_rate = 22500000;
             else
-                fmp4_context->bit_rate = 20000000;
+                fmp4_context->bit_rate = 17500000;
         }
         else {
             if (v4l_codec_yshr == 0)
-                fmp4_context->bit_rate = 8000000;
+                fmp4_context->bit_rate = 15000000;
             else
                 fmp4_context->bit_rate = 12000000;
         }
@@ -578,9 +578,9 @@ static void open_avi_file() {
         }
         else {
             if (v4l_codec_yshr == 0)
-                fmp4_context->bit_rate = 8000000;
+                fmp4_context->bit_rate = 20000000;
             else
-                fmp4_context->bit_rate = 12000000;
+                fmp4_context->bit_rate = 15000000;
         }
     }
     else if (codec_id == AV_CODEC_ID_MPEG4) {
@@ -592,9 +592,9 @@ static void open_avi_file() {
         }
         else {
             if (v4l_codec_yshr == 0)
-                fmp4_context->bit_rate = 20000000;
+                fmp4_context->bit_rate = 25000000;
             else
-                fmp4_context->bit_rate = 16000000;
+                fmp4_context->bit_rate = 20000000;
         }
     }
     else if (codec_id == AV_CODEC_ID_MPEG2VIDEO) {
@@ -671,6 +671,8 @@ static void open_avi_file() {
 
         if (v4l_codec_yshr == 0 && codec_id == AV_CODEC_ID_H264)
             av_dict_set(&opt_dict,"profile","high422",0); /* or else it won't work */
+        else if (v4l_codec_yshr == 0 && codec_id == AV_CODEC_ID_H265)
+            av_dict_set(&opt_dict,"profile","main422-10",0); /* or else it won't work */
         else
             av_dict_set(&opt_dict,"profile","main",0);
 
