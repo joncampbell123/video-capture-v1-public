@@ -1560,7 +1560,26 @@ void xv_draw_zebra(unsigned char *dY,unsigned int dYstride,unsigned char *dU,uns
     zebra_counter++;
 }
 
+static bool put_2nd_field = false;
+
+static unsigned int fieldmap(unsigned int y,unsigned int field,unsigned int fo,unsigned int h) {
+	if ((int)field >= 0) {
+		/* top field:    0 1 2 3 4 5 6 7 8 ...
+		 *               0 2 2 4 4 6 6 8 8 ...
+		 * bottom field: 0 1 2 3 4 5 6 7 8 ...
+		 *               1 1 3 3 5 5 7 7 9 ... */
+		assert(field <= 1);
+		assert(fo <= 1);
+		assert(h >= 2);
+		return (std::min(y + (field^1),h - 1u) & (~1)) + field;
+	}
+
+	return std::min(y,h - 1u);
+}
+
 bool put_live_frame_on_screen(InputManager *input,bool force_redraw/*TODO*/) {
+	unsigned int field_order = ~0u;
+	int field = -1;
 	bool ret = false;
 	unsigned int yshr = 0;
 	uint32_t slot,offset,generation,width,height,stride,y;
@@ -1592,9 +1611,20 @@ bool put_live_frame_on_screen(InputManager *input,bool force_redraw/*TODO*/) {
 	height = xx->height;
 	stride = xx->stride;
 	offset = xx->map[input->shmem_out].offset;
+	field = (int)xx->map[input->shmem_out].field_order - 1;
+	field_order = (unsigned int)field;
 	generation = xx->map[input->shmem_out].generation;
-	if (++input->shmem_out >= input->shmem_slots)
-		input->shmem_out = 0;
+
+	if (field >= 0 && put_2nd_field) field ^= 1;
+
+	if (field >= 0 && !put_2nd_field) { /* interlaced video display, show first, repeat for second */
+		put_2nd_field = true;
+	}
+	else {
+		put_2nd_field = false;
+		if (++input->shmem_out >= input->shmem_slots)
+			input->shmem_out = 0;
+	}
 
 	if (width > 0 && height > 0) {
 		const int p_ar_n = input->source_ar_n;
@@ -1649,16 +1679,16 @@ bool put_live_frame_on_screen(InputManager *input,bool force_redraw/*TODO*/) {
 		unsigned char *dV = (unsigned char*)client_area_xvimage->data + client_area_xvimage->offsets[client_area_v_plane_index];
 
 		for (y=0;y < height;y++)
-			memcpy(dY+(y*dYstride),Y+(y*stride),min((size_t)stride,dYstride));
+			memcpy(dY+(y*dYstride),Y+(fieldmap(y,field,field_order,height)*stride),min((size_t)stride,dYstride));
 
 		for (y=0;y < height;y += 2)
-			memcpy(dU+((y>>1)*dUstride),U+((y>>yshr)*(stride>>1)),min((size_t)(stride>>1),dUstride));
+			memcpy(dU+((y>>1)*dUstride),U+(fieldmap(y>>yshr,field,field_order,height>>yshr)*(stride>>1)),min((size_t)(stride>>1),dUstride));
 
 		for (y=0;y < height;y += 2)
-			memcpy(dV+((y>>1)*dVstride),V+((y>>yshr)*(stride>>1)),min((size_t)(stride>>1),dVstride));
+			memcpy(dV+((y>>1)*dVstride),V+(fieldmap(y>>yshr,field,field_order,height>>yshr)*(stride>>1)),min((size_t)(stride>>1),dVstride));
 
-        if (CurrentInputObj()->zebra)
-            xv_draw_zebra(dY,dYstride,dU,dUstride,dV,dVstride,width,height,CurrentInputObj()->zebra);
+		if (CurrentInputObj()->zebra)
+			xv_draw_zebra(dY,dYstride,dU,dUstride,dV,dVstride,width,height,CurrentInputObj()->zebra);
 
 		ret = true;
 	}
