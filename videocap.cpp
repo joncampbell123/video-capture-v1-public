@@ -186,8 +186,6 @@ public:
 	 * Play = Play the capture file for the input
 	 * Pause = Display still image from capture file, do not advance automatically (like a VCR in Pause+Play mode)
 	 * Stop = Play live video incoming from input (like a VCR tuned to a tv channel and not playing a tape) */
-	bool				Paused;
-	bool				Playing;
 	bool				Recording;
 	/* User overrides */
 	int				user_ar_n,user_ar_d;
@@ -384,12 +382,6 @@ GtkWidget*			main_window_backend_settings = NULL;
 
 GtkWidget*			main_window_toolbar_record = NULL;
 
-GtkWidget*			main_window_control_pause = NULL;
-GtkWidget*			main_window_toolbar_pause = NULL;
-
-GtkWidget*			main_window_control_play = NULL;
-GtkWidget*			main_window_toolbar_play = NULL;
-
 GtkWidget*			main_window_control_stop = NULL;
 GtkWidget*			main_window_toolbar_stop = NULL;
 
@@ -545,8 +537,8 @@ void load_config_section_input(const char *name,const char *value) {
 		iobj->force_interlace = atoi(value);
 	else if (!strcmp(name,"jpeg yuv"))
 		iobj->jpeg_yuv = atoi(value) > 0;
-    else if (!strcmp(name,"zebra"))
-        iobj->zebra = atoi(value);
+	else if (!strcmp(name,"zebra"))
+		iobj->zebra = atoi(value);
 	else if (!strcmp(name,"crop")) {
 		iobj->crop_defrect = iobj->crop_bounds = false;
 		iobj->crop_left = iobj->crop_top = iobj->crop_width = iobj->crop_height = CROP_DEFAULT;
@@ -820,13 +812,6 @@ void update_ui_controls() {
 	/* User cannot use Record button in "No Input" */
 	gtk_widget_set_sensitive(GTK_WIDGET(main_window_toolbar_record), CurrentInput > VIEW_INPUT_OFF);
 
-	/* User cannot use play/pause/stop in "No Input" */
-	gtk_widget_set_sensitive(GTK_WIDGET(main_window_toolbar_play), CurrentInput > VIEW_INPUT_OFF);
-	gtk_widget_set_sensitive(GTK_WIDGET(main_window_control_play), CurrentInput > VIEW_INPUT_OFF);
-
-	gtk_widget_set_sensitive(GTK_WIDGET(main_window_toolbar_pause), CurrentInput > VIEW_INPUT_OFF);
-	gtk_widget_set_sensitive(GTK_WIDGET(main_window_control_pause), CurrentInput > VIEW_INPUT_OFF);
-
 	/* make sure the buttons reflect the Recording state */
 	gtk_toggle_tool_button_set_active_notoggle (GTK_TOGGLE_TOOL_BUTTON(main_window_toolbar_record), CurrentInputObj()->Recording);
 
@@ -836,20 +821,8 @@ void update_ui_controls() {
 	gtk_widget_set_sensitive(GTK_WIDGET(main_window_backend_settings), CurrentInput > VIEW_INPUT_OFF);
 
 	/* Play/Pause = Radio buttons. Only need to set active one and the others will deactivate */
-	if (CurrentInputObj()->Playing) {
-		if (CurrentInputObj()->Paused) {
-			gtk_check_menu_item_set_active_notoggle (GTK_CHECK_MENU_ITEM(main_window_control_pause), TRUE);
-			gtk_toggle_tool_button_set_active_notoggle (GTK_TOGGLE_TOOL_BUTTON(main_window_toolbar_pause), TRUE);
-		}
-		else {
-			gtk_check_menu_item_set_active_notoggle (GTK_CHECK_MENU_ITEM(main_window_control_play), TRUE);
-			gtk_toggle_tool_button_set_active_notoggle (GTK_TOGGLE_TOOL_BUTTON(main_window_toolbar_play), TRUE);
-		}
-	}
-	else {
-		gtk_check_menu_item_set_active_notoggle (GTK_CHECK_MENU_ITEM(main_window_control_stop), TRUE);
-		gtk_toggle_tool_button_set_active_notoggle (GTK_TOGGLE_TOOL_BUTTON(main_window_toolbar_stop), TRUE);
-	}
+	gtk_check_menu_item_set_active_notoggle (GTK_CHECK_MENU_ITEM(main_window_control_stop), TRUE);
+	gtk_toggle_tool_button_set_active_notoggle (GTK_TOGGLE_TOOL_BUTTON(main_window_toolbar_stop), TRUE);
 
 	if (CurrentInputObj()->user_ar_n == 4 && CurrentInputObj()->user_ar_d == 3)
 		gtk_radio_action_set_current_value (GTK_RADIO_ACTION(main_window_view_aspect_action), 1);
@@ -1711,7 +1684,7 @@ bool put_live_frame_on_screen(InputManager *input,bool force_redraw/*TODO*/) {
 
 	std::string status;
 
-	if (!input->Playing && input->vt_rec.video_rate_n > 0UL && input->vt_rec.video_rate_d > 0UL) {
+	if (input->vt_rec.video_rate_n > 0UL && input->vt_rec.video_rate_d > 0UL) {
 		char tmp[256];
 		unsigned long long tm;
 		unsigned int tH,tM,tS,tmS;
@@ -1730,7 +1703,7 @@ bool put_live_frame_on_screen(InputManager *input,bool force_redraw/*TODO*/) {
 		status = tmp;
 	}
 
-	if (!input->Playing) {
+	{
 		char tmp[256];
 		char *w = tmp;
 
@@ -2612,7 +2585,6 @@ void InputManager::close_shmem() {
 
 InputManager::InputManager(int input_index) {
     zebra = 0;
-	Playing = false;
 	Recording = false;
 	osd_name[0] = 0;
 	file_prefix[0] = 0;
