@@ -1061,6 +1061,7 @@ static void open_avi_file() {
 		}
 
 		{
+			const char *encodedfield_str = "";
 			const char *field_str = "";
 			char px[5];
 
@@ -1080,13 +1081,22 @@ static void open_avi_file() {
 				case V4L2_FIELD_INTERLACED_BT:	field_str = "interlaced-bt"; break;
 			};
 
-			sprintf(tmp,"w=%u h=%u stride=%u size=%u pixfmt='%s' field='%s' async=%u",
+			if (effective_v4l_interlaced() == 1)
+				encodedfield_str = "bff";
+			else if (effective_v4l_interlaced() == 0)
+				encodedfield_str = "tff";
+			else if (effective_v4l_interlaced() == -1)
+				encodedfield_str = "p";
+			else
+				encodedfield_str = "?";
+
+			sprintf(tmp,"w=%u h=%u stride=%u size=%u pixfmt='%s' field='%s' encodedfield='%s' async=%u",
 					(unsigned int)v4l_fmt.fmt.pix.width,
 					(unsigned int)v4l_fmt.fmt.pix.height,
 					(unsigned int)v4l_fmt.fmt.pix.bytesperline,
 					(unsigned int)v4l_fmt.fmt.pix.sizeimage,
-					px,field_str,
-                    async_io?1:0);
+					px,field_str,encodedfield_str,
+					async_io?1:0);
 
 			riff_stack_begin_new_chunk_here(AVI->riff,&chunk);
 			riff_stack_set_chunk_data_type(&chunk,avi_fourcc_const('V','C','N','F')); /* video capture info */
