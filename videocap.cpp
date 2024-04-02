@@ -382,7 +382,6 @@ GtkWidget*			main_window_audio_settings = NULL;
 GtkWidget*			main_window_input_settings = NULL;
 GtkWidget*			main_window_backend_settings = NULL;
 
-GtkWidget*			main_window_control_record = NULL;
 GtkWidget*			main_window_toolbar_record = NULL;
 
 GtkWidget*			main_window_control_pause = NULL;
@@ -820,7 +819,6 @@ void gtk_toggle_tool_button_set_active_notoggle (GtkToggleToolButton *x, bool st
 void update_ui_controls() {
 	/* User cannot use Record button in "No Input" */
 	gtk_widget_set_sensitive(GTK_WIDGET(main_window_toolbar_record), CurrentInput > VIEW_INPUT_OFF);
-	gtk_widget_set_sensitive(GTK_WIDGET(main_window_control_record), CurrentInput > VIEW_INPUT_OFF);
 
 	/* User cannot use play/pause/stop in "No Input" */
 	gtk_widget_set_sensitive(GTK_WIDGET(main_window_toolbar_play), CurrentInput > VIEW_INPUT_OFF);
@@ -830,7 +828,6 @@ void update_ui_controls() {
 	gtk_widget_set_sensitive(GTK_WIDGET(main_window_control_pause), CurrentInput > VIEW_INPUT_OFF);
 
 	/* make sure the buttons reflect the Recording state */
-	gtk_check_menu_item_set_active_notoggle (GTK_CHECK_MENU_ITEM(main_window_control_record), CurrentInputObj()->Recording);
 	gtk_toggle_tool_button_set_active_notoggle (GTK_TOGGLE_TOOL_BUTTON(main_window_toolbar_record), CurrentInputObj()->Recording);
 
 	/* no setting input settings for "No Input" */
@@ -2737,11 +2734,6 @@ static void on_main_window_view_osd(GtkMenuItem *menuitem,const char *ui_mgr_pat
 }
 
 /* ----------------------- RECORD -------------------------------*/
-static void on_main_window_control_record(GtkMenuItem *menuitem,const char *ui_mgr_path) {
-	bool sel = (bool)gtk_check_menu_item_get_active (GTK_CHECK_MENU_ITEM(main_window_control_record));
-	CurrentInputObj()->onRecord(sel);
-}
-
 static void on_main_window_record(GtkMenuItem *menuitem,gpointer user_data) {
 	bool sel = (bool)gtk_toggle_tool_button_get_active (GTK_TOGGLE_TOOL_BUTTON(GTK_TOOL_BUTTON(main_window_toolbar_record)));
 	CurrentInputObj()->onRecord(sel);
@@ -5264,8 +5256,6 @@ static GtkActionEntry gtk_all_actions[] = {
 
 	{"ViewMenuZebra",	NULL,			"_Zebra"},
 
-	{"ControlMenu",		NULL,			"_Control"},
-
 	{"PreferencesMenu",	NULL,			"_Preferences"},
 
 	{"ColorMenu",		NULL,			"_Color"},
@@ -5357,9 +5347,6 @@ static const gchar *ui_info =
 "	 <menuitem action='ViewMenuZebra_100'/>"
 "      </menu>"
 "      <menuitem action='ViewMenuOSD'/>"
-"    </menu>"
-"    <menu action='ControlMenu'>"
-"      <menuitem action='ControlMenu_Record'/>"
 "    </menu>"
 "    <menu action='ConfigMenu'>"
 "      <menuitem action='ConfigMenu_X'/>"
@@ -5539,13 +5526,6 @@ static int init_main_window()
 	g_signal_connect(tog_act, "toggled",
 			G_CALLBACK(on_main_window_view_toolbars_status),
 			(void*)("/MenuBar/ViewMenu/ViewMenuToolbars/ViewMenuToolbars_Status"));
-
-	/* Control menu */
-	tog_act = gtk_toggle_action_new ("ControlMenu_Record", "_Record", NULL, NULL);
-	gtk_action_group_add_action (action_group, GTK_ACTION(tog_act));
-	g_signal_connect(tog_act, "toggled",
-			G_CALLBACK(on_main_window_control_record),
-			(void*)("/MenuBar/ControlMenu/ControlMenu_Record"));
 
 	/* View aspect ratio */
 	rad_act = gtk_radio_action_new ("ViewMenuAspectRatio_None", "Match _Source", NULL, NULL, 0);
@@ -5932,9 +5912,6 @@ static int init_main_window()
 	gtk_tool_item_set_homogeneous (GTK_TOOL_ITEM(tmp), FALSE);
 	gtk_tool_button_set_icon_widget (GTK_TOOL_BUTTON(tmp), gtk_image_new_from_file ("record.png"));
 	main_window_toolbar_record = tmp;
-
-	tmp = gtk_ui_manager_get_widget (main_window_ui_mgr, "/MenuBar/ControlMenu/ControlMenu_Record");
-	main_window_control_record = tmp;
 
 	/* input: none button */
 	tmp = gtk_ui_manager_get_widget (main_window_ui_mgr, "/ToolBar/ViewInput_None");
