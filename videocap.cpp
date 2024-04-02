@@ -946,6 +946,10 @@ static bool vidres_sort(const InputManager::vidres_t &a,const InputManager::vidr
 	return false;
 }
 
+static bool vidfps_sort(const InputManager::vidrational_t &a,const InputManager::vidrational_t &b) {
+	return a.fps < b.fps;
+}
+
 void InputManager::video_info_scan(const bool force) {
 	if (video_info_cached && !force) return;
 
@@ -1093,7 +1097,7 @@ void InputManager::video_info_scan(const bool force) {
 				pf = *vpfi;
 			}
 
-			std::sort(video_resolutions.begin(),video_resolutions.end(),vidres_sort);
+			std::sort(video_fps.begin(),video_fps.end(),vidfps_sort);
 		}
 
 		{
@@ -3263,46 +3267,30 @@ static gint v4l_capres_dropdown_populate_and_select(GtkWidget *listbox,GtkListSt
 }
 
 static gint v4l_capfps_dropdown_populate_and_select(GtkWidget *listbox,GtkListStore *list) {
-	static const char *modelist[] = {
-		"1",
-		"2",
-		"5",
-		"10",
-		"15",
-		"20",
-		"24",
-		"25",
-		"29.97",
-		"30",
-		"40",
-		"50",
-		"59.94",
-		"60",
-		"70",
-		"75",
-		"80",
-		"90",
-		"100",
-		"119.88",
-		"120",
-		NULL
-	};
 	void **hints,**n;
 	GtkTreeIter iter;
 	gint active = -1;
+	double pfps = -1;
 	int count = 0;
+	char tmp[64];
 	int index;
+
+	CurrentInputObj()->video_info_scan();
 
 	gtk_list_store_append(list, &iter);
 	gtk_list_store_set(list, &iter, /*column*/0, "", -1);
-	if (active < 0 && (CurrentInputObj()->capture_fps <= 0)) active = 0;
+	if (active < 0 && CurrentInputObj()->capture_fps <= 0) active = 0;
 	count++;
 
-	for (index=0;modelist[index] != NULL;index++) {
-		gtk_list_store_append(list, &iter);
-		gtk_list_store_set(list, &iter, /*column*/0, modelist[index], -1);
-		if (active < 0 && atof(modelist[index]) == CurrentInputObj()->capture_fps) active = count;
-		count++;
+	for (auto ri=CurrentInputObj()->video_fps.begin();ri!=CurrentInputObj()->video_fps.end();ri++) {
+		if (fabs(pfps - (*ri).fps) >= 0.0001) {
+			sprintf(tmp,"%.3f",(*ri).fps);
+			gtk_list_store_append(list, &iter);
+			gtk_list_store_set(list, &iter, /*column*/0, tmp, -1);
+			if (active < 0 && fabs((*ri).fps - CurrentInputObj()->capture_fps) < 0.0001) active = count;
+			pfps = (*ri).fps;
+			count++;
+		}
 	}
 
 	return active;
@@ -4323,6 +4311,20 @@ void on_input_dialog_video_index_change(GtkComboBox *widget,gpointer user_data) 
 	gtk_combo_box_set_model (GTK_COMBO_BOX(input_dialog_capres), model);
 
 	gtk_combo_box_set_active (GTK_COMBO_BOX(input_dialog_capres), active);
+
+	/* capture fps select */
+	model = gtk_combo_box_get_model (GTK_COMBO_BOX(input_dialog_capfps));
+	if (model != NULL) {
+		gtk_list_store_clear (GTK_LIST_STORE(model));
+		gtk_combo_box_set_model (GTK_COMBO_BOX(input_dialog_capfps), model);
+	}
+
+	model = GTK_TREE_MODEL(gtk_list_store_new (2, G_TYPE_STRING, G_TYPE_STRING));
+	assert(model != NULL);
+	active = v4l_capfps_dropdown_populate_and_select (input_dialog_capfps, GTK_LIST_STORE(model));
+	gtk_combo_box_set_model (GTK_COMBO_BOX(input_dialog_capfps), model);
+
+	gtk_combo_box_set_active (GTK_COMBO_BOX(input_dialog_capfps), active);
 
 	CurrentInputObj()->video_index = oldindex;
 }
