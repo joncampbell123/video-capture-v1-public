@@ -687,7 +687,7 @@ static void open_avi_file() {
         av_dict_set(&opt_dict,"x264-params","trellis=0:scenecut=0:mixed-refs=0:me=dia:subme=0:aq-mode=0:b-adapt=0:deblock=1:rc-lookahead=0:ref=0:weightb=0:weightp=0",0);
         av_dict_set(&opt_dict,"coder","vlc",0);
         av_dict_set(&opt_dict,"mbtree","1",0);
-        av_dict_set(&opt_dict,"crf","16",0);
+        av_dict_set(&opt_dict,"crf","1",0);
         av_dict_set(&opt_dict,"vbr","1",0);
     }
     else if (codec_id == AV_CODEC_ID_MPEG4) {
