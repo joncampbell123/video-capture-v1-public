@@ -32,6 +32,8 @@
 #include <X11/extensions/XShm.h>
 #include <X11/extensions/Xvlib.h>
 
+#include <algorithm>
+
 #include <linux/videodev2.h>
 
 #define CROP_DEFAULT (-9999)
@@ -258,6 +260,25 @@ public:
 	bool				inputs_cached = false;
 	void				inputs_scan(const bool force=false);
 	void				inputs_clear(void);
+
+	/* pixel formats, resolutions, and frame rates */
+	std::vector<uint32_t>		video_pixelformats;
+
+	struct vidres_t {
+		unsigned int		width=0,height=0;
+	};
+
+	std::vector<vidres_t>		video_resolutions;
+
+	struct vidrational_t {
+		unsigned int		num=0,den=0;
+		double			fps=0;
+	};
+
+	std::vector<vidrational_t>	video_fps;
+	bool				video_info_cached = false;
+	void				video_info_scan(const bool force=false);
+	void				video_info_clear(void);
 };
 
 void update_ui();
@@ -917,6 +938,207 @@ void ui_notification(GtkMessageType typ,const char *text,...) {
 static void on_not_yet_implemented(GtkAction *action, void *p)
 {
 	ui_notification(GTK_MESSAGE_WARNING, "Command not yet implemented");
+}
+
+static bool vidres_sort(const InputManager::vidres_t &a,const InputManager::vidres_t &b) {
+	if (a.height != b.height) return a.height < b.height;
+	if (a.width != b.width) return a.width < b.width;
+	return false;
+}
+
+void InputManager::video_info_scan(const bool force) {
+	if (video_info_cached && !force) return;
+
+	video_pixelformats.clear();
+	video_resolutions.clear();
+	video_fps.clear();
+	video_info_cached = true;
+
+	char tmp[64];
+	int fd;
+
+	if (video_index >= 0) {
+		sprintf(tmp,"/dev/video%u",video_index);
+		fd = open(tmp,O_RDONLY);
+		if (fd < 0) fprintf(stderr,"Failed to open %s, %s\n",tmp,strerror(errno));
+	}
+	else {
+		fd = -1;
+	}
+
+	if (fd >= 0) {
+		{
+			struct v4l2_fmtdesc ft;
+			unsigned int fmti = 0;
+
+			while (1) {
+				memset(&ft,0,sizeof(ft));
+				ft.index = fmti++;
+				ft.type = V4L2_BUF_TYPE_VIDEO_CAPTURE;
+				if (ioctl(fd,VIDIOC_ENUM_FMT,&ft) != 0) break;
+				video_pixelformats.push_back(ft.pixelformat);
+			}
+
+			std::sort(video_pixelformats.begin(),video_pixelformats.end());
+		}
+
+		{
+			uint32_t pf = (uint32_t)(~0ul);
+			for (auto vpfi=video_pixelformats.begin();vpfi!=video_pixelformats.end();vpfi++) {
+				if (pf != *vpfi) {
+					struct v4l2_frmsizeenum fse;
+					unsigned int frszi = 0;
+
+					while (1) {
+						fse.index = frszi++;
+						fse.pixel_format = *vpfi;
+						if (ioctl(fd,VIDIOC_ENUM_FRAMESIZES,&fse) != 0) break;
+
+						if (fse.type == V4L2_FRMSIZE_TYPE_DISCRETE) {
+							const struct v4l2_frmsize_discrete &d = fse.discrete;
+							struct vidres_t vres;
+							vres.height = d.height;
+							vres.width = d.width;
+							video_resolutions.push_back(std::move(vres));
+						}
+						else if (fse.type == V4L2_FRMSIZE_TYPE_CONTINUOUS || fse.type == V4L2_FRMSIZE_TYPE_STEPWISE) {
+							struct v4l2_frmsize_stepwise &s = fse.stepwise;
+
+							for (unsigned int height=s.min_height;height<=s.max_height;height+=s.step_height) {
+								if (height >= 480) {
+									if ((height%64) != 0) continue;
+								}
+								else if (height >= 240) {
+									if ((height%32) != 0) continue;
+								}
+								else {
+									if ((height%16) != 0) continue;
+								}
+
+								for (unsigned int width=s.min_width;width<=s.max_width;width+=s.step_width) {
+									if (width >= 480) {
+										if ((width%64) != 0) continue;
+									}
+									else if (width >= 240) {
+										if ((width%32) != 0) continue;
+									}
+									else {
+										if ((width%16) != 0) continue;
+									}
+
+									struct vidres_t vres;
+									vres.height = height;
+									vres.width = width;
+									video_resolutions.push_back(std::move(vres));
+								}
+							}
+						}
+					}
+				}
+
+				pf = *vpfi;
+			}
+
+			std::sort(video_resolutions.begin(),video_resolutions.end(),vidres_sort);
+		}
+
+		{
+			uint32_t pf = (uint32_t)(~0ul);
+			for (auto vpfi=video_pixelformats.begin();vpfi!=video_pixelformats.end();vpfi++) {
+				if (pf != *vpfi) {
+					struct vidres_t pr;
+					for (auto vri=video_resolutions.begin();vri!=video_resolutions.end();vri++) {
+						if (pr.width != (*vri).width || pr.height != (*vri).height) {
+							struct v4l2_frmivalenum fri;
+							unsigned int ri = 0;
+
+							while (1) {
+								fri.index = ri++;
+								fri.pixel_format = *vpfi;
+								fri.height = (*vri).height;
+								fri.width = (*vri).width;
+								if (ioctl(fd,VIDIOC_ENUM_FRAMEINTERVALS,&fri) != 0) break;
+
+								if (fri.type == V4L2_FRMIVAL_TYPE_DISCRETE) {
+									const struct v4l2_fract &d = fri.discrete;
+									vidrational_t vr;
+									vr.num = d.numerator;
+									vr.den = d.denominator;
+									vr.fps = (double)d.denominator / (double)d.numerator;
+									video_fps.push_back(std::move(vr));
+								}
+								else if (fri.type == V4L2_FRMIVAL_TYPE_CONTINUOUS || fri.type == V4L2_FRMIVAL_TYPE_STEPWISE) {
+									const struct v4l2_frmival_stepwise &d = fri.stepwise;
+									double min_fps = (double)d.min.denominator / (double)d.min.numerator;
+									double max_fps = (double)d.max.denominator / (double)d.max.numerator;
+									double step_fps = (double)d.step.denominator / (double)d.step.numerator;
+									for (double fps=min_fps;fps<=max_fps;fps+=step_fps) {
+										vidrational_t vr;
+										vr.num = 0;
+										vr.den = 0;
+										vr.fps = fps;
+										video_fps.push_back(std::move(vr));
+
+										if (step_fps <= 0.5) fps = ceil(fps) - step_fps;
+									}
+								}
+							}
+
+						}
+
+						pr = *vri;
+					}
+				}
+
+				pf = *vpfi;
+			}
+
+			std::sort(video_resolutions.begin(),video_resolutions.end(),vidres_sort);
+		}
+
+		{
+			uint32_t pf = (uint32_t)(~0ul);
+
+			fprintf(stderr,"V4L enum pixels:");
+			for (auto i=video_pixelformats.begin();i!=video_pixelformats.end();i++) {
+				if (pf != *i) fprintf(stderr," 0x%08lx",(unsigned long)(*i));
+				pf = *i;
+			}
+			fprintf(stderr,"\n");
+		}
+
+		{
+			vidres_t pr;
+
+			fprintf(stderr,"V4L enum res:");
+			for (auto i=video_resolutions.begin();i!=video_resolutions.end();i++) {
+				if (pr.width != (*i).width || pr.height != (*i).height) fprintf(stderr," %ux%u",(*i).width,(*i).height);
+				pr = *i;
+			}
+			fprintf(stderr,"\n");
+		}
+
+		{
+			double p_fps = 0;
+
+			fprintf(stderr,"V4L enum fps:");
+			for (auto i=video_fps.begin();i!=video_fps.end();i++) {
+				if (fabs(p_fps - (*i).fps) >= 0.0001) fprintf(stderr," %.3f",(*i).fps);
+				p_fps = (*i).fps;
+			}
+			fprintf(stderr,"\n");
+		}
+
+		close(fd);
+		fd = -1;
+	}
+}
+
+void InputManager::video_info_clear(void) {
+	video_pixelformats.clear();
+	video_resolutions.clear();
+	video_fps.clear();
+	video_info_cached = false;
 }
 
 void InputManager::inputs_clear(void) {
@@ -3274,6 +3496,7 @@ static gint v4l_input_dropdown_populate_and_select(GtkWidget *listbox,GtkListSto
 	count++;
 
 	CurrentInputObj()->inputs_scan();
+	CurrentInputObj()->video_info_scan();
 
 	for (auto i=CurrentInputObj()->inputs.begin();i!=CurrentInputObj()->inputs.end();i++) {
 		gtk_list_store_append(list, &iter);
@@ -4064,8 +4287,29 @@ void on_input_dialog_video_index_change(GtkComboBox *widget,gpointer user_data) 
 	fprintf(stderr,"On change\n");
 
 	CurrentInputObj()->inputs_clear();
+	CurrentInputObj()->video_info_clear();
 
-	CurrentInputObj()->video_index = gtk_combo_box_get_active (GTK_COMBO_BOX(input_dialog_video_index));
+	active = gtk_combo_box_get_active (GTK_COMBO_BOX(input_dialog_video_index));
+	model = gtk_combo_box_get_model (GTK_COMBO_BOX(input_dialog_video_index));
+
+	int old_input_video_index = CurrentInputObj()->video_index;
+
+	CurrentInputObj()->video_index = -1;
+	if (model != NULL && active >= 0) {
+		GtkTreeIter iter;
+		char *str;
+		GValue v;
+
+		memset(&v,0,sizeof(v));
+		if (gtk_tree_model_iter_nth_child(model,&iter,NULL,active) == TRUE) {
+			gtk_tree_model_get_value(model,&iter,1,&v);
+			str = (char*)g_value_get_string(&v);
+			if (str) CurrentInputObj()->video_index = atoi(str);
+			fprintf(stderr,"updated input video index is '%d'\n",CurrentInputObj()->input_device.c_str());
+		}
+
+		g_value_unset(&v);
+	}
 
 	model = gtk_combo_box_get_model (GTK_COMBO_BOX(input_dialog_device));
 	if (model != NULL) {
