@@ -3201,14 +3201,14 @@ static gint v4l_force_interlace_dropdown_populate_and_select(GtkWidget *listbox,
 
 static gint v4l_codec_dropdown_populate_and_select(GtkWidget *listbox,GtkListStore *list) {
 	static const char *modelist[] = {
-        "mpeg2",
-        "mpeg2-422",
-        "mpeg4",
-        "mpeg4-422",
+		"mpeg2",
+		"mpeg2-422",
+		"mpeg4",
+		"mpeg4-422",
 		"h264",
 		"h264-422",
-        "h265",
-        "h265-422",
+		"h265",
+		"h265-422",
 		NULL
 	};
 	void **hints,**n;
@@ -3233,26 +3233,7 @@ static gint v4l_codec_dropdown_populate_and_select(GtkWidget *listbox,GtkListSto
 }
 
 static gint v4l_capres_dropdown_populate_and_select(GtkWidget *listbox,GtkListStore *list) {
-	static const char *modelist[] = {
-		"160x120",
-		"240x180",
-		"320x240",
-		"352x288",
-		"352x480",
-		"480x480",
-		"480x576",
-		"576x480",
-		"576x576",
-		"640x480",
-		"640x576",
-		"720x480",
-		"720x576",
-		"800x600",
-		"1024x768",
-		"1280x720",
-		"1920x1080",
-		NULL
-	};
+	InputManager::vidres_t pr;
 	void **hints,**n;
 	GtkTreeIter iter;
 	gint active = -1;
@@ -3260,17 +3241,22 @@ static gint v4l_capres_dropdown_populate_and_select(GtkWidget *listbox,GtkListSt
 	char tmp[64];
 	int index;
 
+	CurrentInputObj()->video_info_scan();
+
 	gtk_list_store_append(list, &iter);
 	gtk_list_store_set(list, &iter, /*column*/0, "", -1);
 	if (active < 0 && (CurrentInputObj()->capture_width == 0 || CurrentInputObj()->capture_height == 0)) active = 0;
 	count++;
 
-	sprintf(tmp,"%dx%d",CurrentInputObj()->capture_width,CurrentInputObj()->capture_height);
-	for (index=0;modelist[index] != NULL;index++) {
-		gtk_list_store_append(list, &iter);
-		gtk_list_store_set(list, &iter, /*column*/0, modelist[index], -1);
-		if (active < 0 && !strcmp(tmp,modelist[index])) active = count;
-		count++;
+	for (auto ri=CurrentInputObj()->video_resolutions.begin();ri!=CurrentInputObj()->video_resolutions.end();ri++) {
+		if (pr.width != (*ri).width || pr.height != (*ri).height) {
+			sprintf(tmp,"%dx%d",(*ri).width,(*ri).height);
+			gtk_list_store_append(list, &iter);
+			gtk_list_store_set(list, &iter, /*column*/0, tmp, -1);
+			if (active < 0 && (*ri).width == CurrentInputObj()->capture_width && (*ri).height == CurrentInputObj()->capture_height) active = count;
+			pr = *ri;
+			count++;
+		}
 	}
 
 	return active;
@@ -4323,6 +4309,20 @@ void on_input_dialog_video_index_change(GtkComboBox *widget,gpointer user_data) 
 	gtk_combo_box_set_model (GTK_COMBO_BOX(input_dialog_device), model);
 
 	gtk_combo_box_set_active (GTK_COMBO_BOX(input_dialog_device), active);
+
+	/* capture res select */
+	model = gtk_combo_box_get_model (GTK_COMBO_BOX(input_dialog_capres));
+	if (model != NULL) {
+		gtk_list_store_clear (GTK_LIST_STORE(model));
+		gtk_combo_box_set_model (GTK_COMBO_BOX(input_dialog_capres), model);
+	}
+
+	model = GTK_TREE_MODEL(gtk_list_store_new (2, G_TYPE_STRING, G_TYPE_STRING));
+	assert(model != NULL);
+	active = v4l_capres_dropdown_populate_and_select (input_dialog_capres, GTK_LIST_STORE(model));
+	gtk_combo_box_set_model (GTK_COMBO_BOX(input_dialog_capres), model);
+
+	gtk_combo_box_set_active (GTK_COMBO_BOX(input_dialog_capres), active);
 
 	CurrentInputObj()->video_index = oldindex;
 }
