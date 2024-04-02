@@ -5255,7 +5255,7 @@ static GtkActionEntry gtk_all_actions[] = {
 		"<control><shift>X",	"Configure how this program communicates with your X Windows desktop",
 			G_CALLBACK (on_configuration_x)},
 
-	{"ConfigMenu_Backend",	NULL,			"_Input backend settings",
+	{"ConfigMenu_Backend",	NULL,			"Input _backend settings",
 		"<control><shift>B",	"Configure input capture backend associated with this input",
 			G_CALLBACK (on_configuration_backend)},
 
