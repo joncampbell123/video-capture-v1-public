@@ -1716,7 +1716,6 @@ bool put_live_frame_on_screen(InputManager *input,bool force_redraw/*TODO*/) {
 
 	if (!input->Playing && input->vt_rec.video_rate_n > 0UL && input->vt_rec.video_rate_d > 0UL) {
 		char tmp[256];
-		unsigned int H,M,S,mS;
 		unsigned long long tm;
 		unsigned int tH,tM,tS,tmS;
 		const char *name = strrchr(input->capture_avi.c_str(),'/');
@@ -1730,7 +1729,7 @@ bool put_live_frame_on_screen(InputManager *input,bool force_redraw/*TODO*/) {
 		tM = (unsigned int)((tm / 1000LL / 60LL) % 60ULL);
 		tH = (unsigned int)(tm / 1000LL / 3600LL);
 
-		snprintf(tmp,sizeof(tmp),"Recorded %u:%02u:%02u.%03u (playback at %u:%02u:%02u.%03u) %s",tH,tM,tS,tmS,H,M,S,mS,name);
+		snprintf(tmp,sizeof(tmp),"Recorded %u:%02u:%02u.%03u %s",tH,tM,tS,tmS,name);
 		status = tmp;
 	}
 
