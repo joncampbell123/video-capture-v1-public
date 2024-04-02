@@ -252,6 +252,12 @@ public:
 	/* playback speed control (as integer ratios) */
 	int				playback_speed_n;
 	unsigned int			playback_speed_d;
+
+	/* inputs to capture card */
+	std::vector<std::string>	inputs;
+	bool				inputs_cached = false;
+	void				inputs_scan(const bool force=false);
+	void				inputs_clear(void);
 };
 
 void update_ui();
@@ -911,6 +917,50 @@ void ui_notification(GtkMessageType typ,const char *text,...) {
 static void on_not_yet_implemented(GtkAction *action, void *p)
 {
 	ui_notification(GTK_MESSAGE_WARNING, "Command not yet implemented");
+}
+
+void InputManager::inputs_clear(void) {
+	inputs.clear();
+	inputs_cached = false;
+}
+
+void InputManager::inputs_scan(const bool force) {
+	if (inputs_cached && !force) return;
+
+	inputs.clear();
+	inputs_cached = true;
+
+	char tmp[64];
+	int fd;
+
+	if (video_index >= 0) {
+		sprintf(tmp,"/dev/video%u",video_index);
+		fd = open(tmp,O_RDONLY);
+		if (fd < 0) fprintf(stderr,"Failed to open %s, %s\n",tmp,strerror(errno));
+	}
+	else {
+		fd = -1;
+	}
+
+	if (fd >= 0) {
+		struct v4l2_input v4l2_input;
+		unsigned int index;
+
+		for (index=0;index < 10000;index++) {
+			memset(&v4l2_input,0,sizeof(v4l2_input));
+			v4l2_input.index = index;
+			if (ioctl(fd,VIDIOC_ENUMINPUT,&v4l2_input) == 0) {
+				fprintf(stderr," [%u] '%s'\n",index,(const char*)v4l2_input.name);
+				inputs.push_back((const char*)v4l2_input.name);
+			}
+			else if (index >= 8) {
+				break;
+			}
+		}
+
+		close(fd);
+		fd = -1;
+	}
 }
 
 void InputManager::start_recording() {
@@ -3223,34 +3273,13 @@ static gint v4l_input_dropdown_populate_and_select(GtkWidget *listbox,GtkListSto
 	if (active < 0 && CurrentInputObj()->input_device == "") active = 0;
 	count++;
 
-	if (CurrentInputObj()->video_index >= 0) {
-		sprintf(tmp,"/dev/video%u",CurrentInputObj()->video_index);
-		fd = open(tmp,O_RDONLY);
-		if (fd < 0) fprintf(stderr,"Failed to open %s, %s\n",tmp,strerror(errno));
-	}
-	else {
-		fd = -1;
-	}
+	CurrentInputObj()->inputs_scan();
 
-	if (fd >= 0) {
-		struct v4l2_input v4l2_input;
-		unsigned int index;
-
-		for (index=0;index < 10000;index++) {
-			memset(&v4l2_input,0,sizeof(v4l2_input));
-			v4l2_input.index = index;
-			if (ioctl(fd,VIDIOC_ENUMINPUT,&v4l2_input) == 0) {
-				fprintf(stderr," [%u] '%s'\n",index,(const char*)v4l2_input.name);
-
-				gtk_list_store_append(list, &iter);
-				gtk_list_store_set(list, &iter, /*column*/0, (const char*)v4l2_input.name, -1);
-				if (active < 0 && CurrentInputObj()->input_device == (const char*)v4l2_input.name) active = count;
-				count++;
-			}
-		}
-
-		close(fd);
-		fd = -1;
+	for (auto i=CurrentInputObj()->inputs.begin();i!=CurrentInputObj()->inputs.end();i++) {
+		gtk_list_store_append(list, &iter);
+		gtk_list_store_set(list, &iter, /*column*/0, (*i).c_str(), -1);
+		if (active < 0 && CurrentInputObj()->input_device == (*i)) active = count;
+		count++;
 	}
 
 	return active;
@@ -4033,6 +4062,8 @@ void on_input_dialog_video_index_change(GtkComboBox *widget,gpointer user_data) 
 	gint active;
 
 	fprintf(stderr,"On change\n");
+
+	CurrentInputObj()->inputs_clear();
 
 	CurrentInputObj()->video_index = gtk_combo_box_get_active (GTK_COMBO_BOX(input_dialog_video_index));
 
