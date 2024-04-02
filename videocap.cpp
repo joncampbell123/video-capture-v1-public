@@ -3173,6 +3173,7 @@ static gint v4l_video_index_dropdown_populate_and_select(GtkWidget *listbox,GtkL
 		if (stat(tmp,&st) == 0 && S_ISCHR(st.st_mode)) {
 			std::string name = "unknown";
 			std::string typ = "capture";
+			bool ignore = false;
 
 			{
 				int fd = open(tmp,O_RDONLY);
@@ -3184,10 +3185,12 @@ static gint v4l_video_index_dropdown_populate_and_select(GtkWidget *listbox,GtkL
 						/* List only CAPTURE devices.
 						 * Do not list OUTPUT devices.
 						 * For uvcvideo USB webcams, this also filters out those extra "metadata capture" devices */
+						ignore = true;
 						if (c.capabilities & V4L2_CAP_DEVICE_CAPS) {
 							typ = "?";
 							if (c.device_caps & V4L2_CAP_VIDEO_CAPTURE) {
 								typ = "capture";
+								ignore = false;
 							}
 							else if (c.device_caps & V4L2_CAP_VIDEO_OUTPUT) {
 								typ = "output";
@@ -3222,11 +3225,18 @@ static gint v4l_video_index_dropdown_populate_and_select(GtkWidget *listbox,GtkL
 				}
 			}
 
-			snprintf(tmp,sizeof(tmp),"Card %u (%s) %s",index,name.c_str(),typ.c_str());
-			gtk_list_store_append(list, &iter);
-			gtk_list_store_set(list, &iter, /*column*/0, tmp, -1);
-			if (CurrentInputObj()->video_index == index) active = count;
-			count++;
+			if (!ignore) {
+				gtk_list_store_append(list, &iter);
+
+				snprintf(tmp,sizeof(tmp),"Card %u (%s) %s",index,name.c_str(),typ.c_str());
+				gtk_list_store_set(list, &iter, /*column*/0, tmp, -1);
+
+				sprintf(tmp,"%u",index);
+				gtk_list_store_set(list, &iter, /*column*/1, tmp, -1);
+
+				if (CurrentInputObj()->video_index == index) active = count;
+				count++;
+			}
 		}
 	}
 
@@ -3598,12 +3608,9 @@ static bool update_vars_from_input_dialog() {
 
 		memset(&v,0,sizeof(v));
 		if (gtk_tree_model_iter_nth_child(model,&iter,NULL,active) == TRUE) {
-			gtk_tree_model_get_value(model,&iter,0,&v);
+			gtk_tree_model_get_value(model,&iter,1,&v);
 			str = (char*)g_value_get_string(&v);
-			if (str) {
-				if (!strncmp(str,"Card ",5) && isdigit(str[5]))
-					CurrentInputObj()->video_index = atoi(str+5);
-			}
+			if (str) CurrentInputObj()->video_index = atoi(str);
 			fprintf(stderr,"updated input video index is '%d'\n",CurrentInputObj()->input_device.c_str());
 		}
 
