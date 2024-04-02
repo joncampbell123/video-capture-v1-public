@@ -272,11 +272,18 @@ static struct v4l2_buffer	v4l_buf[30];
 static unsigned char*		v4l_ptr[30]={NULL};
 static double			v4l_basetime = -1;
 
+static int field_opposite(const int x) {
+	if (x >= 0)
+		return x ^ 1;
+	else
+		return x;
+}
+
 static int effective_v4l_interlaced(void) {
     if (v4l_force_interlaced >= -1)
-        return v4l_force_interlaced;
+        return swap_fields ? field_opposite(v4l_force_interlaced) : v4l_force_interlaced;
     else
-        return v4l_interlaced;
+        return swap_fields ? field_opposite(v4l_interlaced) : v4l_interlaced;
 }
 
 static struct v4l2_capability	v4l_caps;
