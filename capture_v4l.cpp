@@ -255,7 +255,7 @@ static int			v4l_crop_y = CROP_DEFAULT;
 static int			v4l_crop_w = CROP_DEFAULT;
 static int			v4l_crop_h = CROP_DEFAULT;
 static int			v4l_width = 720,v4l_height = 480;
-static double       want_fps = -1;
+static double			want_fps = -1;
 static int			want_width = -1,want_height = -1;
 static int			v4l_framerate_n = 30000,v4l_framerate_d = 1001;
 static int			v4l_force_interlaced = -2;
@@ -1251,9 +1251,9 @@ static int parse_argv(int argc,char **argv) {
 			else if (!strcmp(a,"ch")) {
 				v4l_crop_h = atoi(argv[i++]);
 			}
-            else if (!strcmp(a,"fps")) {
-                want_fps = atoi(argv[i++]);
-            }
+			else if (!strcmp(a,"fps")) {
+				want_fps = atof(argv[i++]);
+			}
 			else if (!strcmp(a,"width")) {
 				want_width = atoi(argv[i++]);
 			}
@@ -1994,41 +1994,41 @@ int open_v4l() {
 		v4l_framerate_n = 300000; /* Linux kernel trick: 300Hz common multiple of NTSC and PAL */
 		v4l_framerate_d = 1001;
 
-        /* if the user wants anything else, then apply it now */
-        if (want_fps > 0) {
-            if (want_fps >= 29.9 && want_fps < 29.99) {
-                v4l_framerate_n = 30000;
-                v4l_framerate_d = 1001;
-            }
-            else if (want_fps >= 59.9 && want_fps < 59.98) {
-                v4l_framerate_n = 60000;
-                v4l_framerate_d = 1001;
-            }
-            else if (want_fps >= 119.8 && want_fps < 119.95) {
-                v4l_framerate_n = 120000;
-                v4l_framerate_d = 1001;
-            }
-            else {
-                const double fudge = 0.005;
-                unsigned int w = (unsigned int)floor(want_fps+fudge);
-                double f = want_fps - w;
+		/* if the user wants anything else, then apply it now */
+		if (want_fps > 0) {
+			if (want_fps >= 29.9 && want_fps < 29.99) {
+				v4l_framerate_n = 30000;
+				v4l_framerate_d = 1001;
+			}
+			else if (want_fps >= 59.9 && want_fps < 59.98) {
+				v4l_framerate_n = 60000;
+				v4l_framerate_d = 1001;
+			}
+			else if (want_fps >= 119.8 && want_fps < 119.95) {
+				v4l_framerate_n = 120000;
+				v4l_framerate_d = 1001;
+			}
+			else {
+				const double fudge = 0.005;
+				unsigned int w = (unsigned int)floor(want_fps+fudge);
+				double f = want_fps - w;
 
-                assert(f >= 0 && f < 1.0);
+				assert(f >= 0 && f < 1.0);
 
-                unsigned int wf = (unsigned int)(f * 100);
+				unsigned int wf = (unsigned int)(f * 100);
 
-                if (wf == 0) {
-                    v4l_framerate_n = w;
-                    v4l_framerate_d = 1;
-                }
-                else {
-                    v4l_framerate_n = (w * 100U) + wf;
-                    v4l_framerate_d = 100;
-                }
-            }
-        }
+				if (wf == 0) {
+					v4l_framerate_n = w;
+					v4l_framerate_d = 1;
+				}
+				else {
+					v4l_framerate_n = (w * 100U) + wf;
+					v4l_framerate_d = 100;
+				}
+			}
+		}
 
-        fprintf(stderr,"Initial fps: %u/%u\n",v4l_framerate_n,v4l_framerate_d);
+		fprintf(stderr,"Initial fps: %u/%u\n",v4l_framerate_n,v4l_framerate_d);
 
 		{
 			struct v4l2_streamparm prm;
