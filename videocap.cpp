@@ -223,7 +223,7 @@ public:
 	bool				crop_bounds;
 	bool				crop_defrect;
 	bool				swap_fields;
-    int				    force_interlace = -2;
+	int				force_interlace = -2;
 	bool				jpeg_yuv;
 	bool				async_io;
 	int				crop_left,crop_top,crop_width,crop_height;
@@ -568,9 +568,6 @@ void load_config_section_input(const char *name,const char *value) {
 			if (*s == ',') s++;
 		}
 	}
-
-	if (iobj->backend.empty())
-		iobj->backend = "video4linux";
 }
 
 /* load configuration: section [xwindows] */
@@ -673,8 +670,14 @@ void load_configuration() {
 	string path = CONFIG_FILE_NAME;	/* DEFAULT: Current working directory */
 	struct stat st;
 
-	if (stat(path.c_str(),&st) == 0 && S_ISREG(st.st_mode)) {
+	if (stat(path.c_str(),&st) == 0 && S_ISREG(st.st_mode))
 		load_configuration_file(path.c_str());
+
+	for (unsigned int input=0;input < VIEW_INPUT_MAX;input++) {
+		InputManager *iobj = Input[input];
+
+		if (iobj->backend.empty())
+			iobj->backend = "video4linux";
 	}
 }
 
