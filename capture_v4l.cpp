@@ -1767,6 +1767,107 @@ int open_v4l() {
 			fprintf(stderr,"Desc:    %s\n",ft.description);
 			*((uint32_t*)tmp) = ft.pixelformat; tmp[4] = 0;
 			fprintf(stderr,"Pixelfmt:%X '%s'\n",ft.pixelformat,tmp);
+
+			{
+				struct v4l2_frmsizeenum fse;
+				unsigned int fi = 0;
+
+				fprintf(stderr,"Frame sizes for pixel formats:\n");
+				do {
+					fse.index = fi;
+					fse.pixel_format = ft.pixelformat;
+
+					unsigned int query_width = 640,query_height = 480;
+
+					if (ioctl(v4l_fd,VIDIOC_ENUM_FRAMESIZES,&fse) != 0) {
+						if (errno != EINVAL)
+							fprintf(stderr,"Frame size DONE %s\n",strerror(errno));
+
+						break;
+					}
+
+					if (fse.type == V4L2_FRMSIZE_TYPE_DISCRETE) {
+						const struct v4l2_frmsize_discrete &d = fse.discrete;
+						fprintf(stderr,"  Discrete %u: %ux%u\n",fi,(unsigned int)d.width,(unsigned int)d.height);
+						query_width = d.width;
+						query_height = d.height;
+					}
+					else if (fse.type == V4L2_FRMSIZE_TYPE_CONTINUOUS || fse.type == V4L2_FRMSIZE_TYPE_STEPWISE) {
+						const struct v4l2_frmsize_stepwise &s = fse.stepwise;
+
+						if (fse.type == V4L2_FRMSIZE_TYPE_CONTINUOUS)
+							fprintf(stderr,"  Continuous %u: ",fi);
+						else
+							fprintf(stderr,"  Stepwise %u: ",fi);
+
+						fprintf(stderr,"width(min/max/step)=%u/%u/%u height(min/max/step)=%u/%u/%u",
+							(unsigned int)s.min_width,
+							(unsigned int)s.max_width,
+							(unsigned int)s.step_width,
+							(unsigned int)s.min_height,
+							(unsigned int)s.max_height,
+							(unsigned int)s.step_height);
+
+						query_width = s.max_width;
+						query_height = s.max_height;
+						fprintf(stderr,"\n");
+					}
+
+					{
+						struct v4l2_frmivalenum fri;
+						unsigned int ri = 0;
+
+						do {
+							fri.index = ri;
+							fri.pixel_format = ft.pixelformat;
+							fri.height = query_height;
+							fri.width = query_width;
+
+							if (ioctl(v4l_fd,VIDIOC_ENUM_FRAMEINTERVALS,&fri) != 0) {
+								if (errno != EINVAL)
+									fprintf(stderr,"Frame interval DONE %s\n",strerror(errno));
+
+								break;
+							}
+
+							if (fri.type == V4L2_FRMIVAL_TYPE_DISCRETE) {
+								const struct v4l2_fract &d = fri.discrete;
+
+								fprintf(stderr,"     Interval %u/%u (%.3f)\n",
+									(unsigned int)d.numerator,
+									(unsigned int)d.denominator,
+									(double)d.numerator / (double)d.denominator);
+							}
+							else if (fri.type == V4L2_FRMIVAL_TYPE_CONTINUOUS || fri.type == V4L2_FRMIVAL_TYPE_STEPWISE) {
+								const struct v4l2_frmival_stepwise &d = fri.stepwise;
+
+								if (fse.type == V4L2_FRMIVAL_TYPE_CONTINUOUS)
+									fprintf(stderr,"  Continuous %u: ",fi);
+								else
+									fprintf(stderr,"  Stepwise %u: ",fi);
+
+								fprintf(stderr,"     Interval min=%u/%u (%.3f) max=%u/%u (%.3f) step=%u/%u (%.3f)\n",
+									(unsigned int)d.min.numerator,
+									(unsigned int)d.min.denominator,
+									(double)d.min.numerator / (double)d.min.denominator,
+
+									(unsigned int)d.max.numerator,
+									(unsigned int)d.max.denominator,
+									(double)d.max.numerator / (double)d.max.denominator,
+
+									(unsigned int)d.step.numerator,
+									(unsigned int)d.step.denominator,
+									(double)d.step.numerator / (double)d.step.denominator);
+							}
+
+							ri++;
+						} while (1);
+					}
+
+					fi++;
+				} while (1);
+			}
+
 			i++;
 		} while (1);
 
