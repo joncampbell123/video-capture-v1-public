@@ -1100,6 +1100,53 @@ void InputManager::video_info_scan(const bool force) {
 			std::sort(video_fps.begin(),video_fps.end(),vidfps_sort);
 		}
 
+		/* Some of my capture cards do not support enumerating frame sizes, and therefore cannot enumerate frame rates either */
+		if (video_resolutions.empty()) {
+			struct vidres_t pr;
+
+			pr.width =  160; pr.height =  120; video_resolutions.push_back(std::move(pr));
+			pr.width =  176; pr.height =  144; video_resolutions.push_back(std::move(pr));
+			pr.width =  320; pr.height =  240; video_resolutions.push_back(std::move(pr));
+			pr.width =  352; pr.height =  240; video_resolutions.push_back(std::move(pr));
+			pr.width =  352; pr.height =  288; video_resolutions.push_back(std::move(pr));
+			pr.width =  384; pr.height =  288; video_resolutions.push_back(std::move(pr));
+			pr.width =  352; pr.height =  480; video_resolutions.push_back(std::move(pr));
+			pr.width =  352; pr.height =  576; video_resolutions.push_back(std::move(pr));
+			pr.width =  480; pr.height =  480; video_resolutions.push_back(std::move(pr));
+			pr.width =  480; pr.height =  576; video_resolutions.push_back(std::move(pr));
+			pr.width =  640; pr.height =  480; video_resolutions.push_back(std::move(pr));
+			pr.width =  720; pr.height =  480; video_resolutions.push_back(std::move(pr));
+			pr.width =  640; pr.height =  576; video_resolutions.push_back(std::move(pr));
+			pr.width =  720; pr.height =  576; video_resolutions.push_back(std::move(pr));
+			pr.width =  800; pr.height =  600; video_resolutions.push_back(std::move(pr));
+			pr.width =  960; pr.height =  540; video_resolutions.push_back(std::move(pr));
+			pr.width = 1024; pr.height =  768; video_resolutions.push_back(std::move(pr));
+			pr.width = 1280; pr.height =  720; video_resolutions.push_back(std::move(pr));
+			pr.width = 1920; pr.height = 1080; video_resolutions.push_back(std::move(pr));
+			std::sort(video_resolutions.begin(),video_resolutions.end(),vidres_sort);
+		}
+
+		/* Some of my capture cards do not support enumerating frame sizes, and therefore cannot enumerate frame rates either */
+		if (video_fps.empty()) {
+			struct vidrational_t r;
+
+			r.fps =  5.00; video_fps.push_back(std::move(r));
+			r.fps =  8.00; video_fps.push_back(std::move(r));
+			r.fps = 10.00; video_fps.push_back(std::move(r));
+			r.fps = 15.00; video_fps.push_back(std::move(r));
+			r.fps = 20.00; video_fps.push_back(std::move(r));
+			r.fps = 25.00; video_fps.push_back(std::move(r));
+			r.fps = 29.97; video_fps.push_back(std::move(r));
+			r.fps = 30.00; video_fps.push_back(std::move(r));
+			r.fps = 50.00; video_fps.push_back(std::move(r));
+			r.fps = 59.94; video_fps.push_back(std::move(r));
+			r.fps = 60.00; video_fps.push_back(std::move(r));
+			r.fps = 70.00; video_fps.push_back(std::move(r));
+			r.fps = 72.00; video_fps.push_back(std::move(r));
+			r.fps = 75.00; video_fps.push_back(std::move(r));
+			std::sort(video_fps.begin(),video_fps.end(),vidfps_sort);
+		}
+
 		{
 			uint32_t pf = (uint32_t)(~0ul);
 
