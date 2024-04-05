@@ -177,15 +177,6 @@ void flush_async_queue(void) {
     }
 }
 
-/* FIXME: Red Hat 4.1.2 Video4Linux doesn't have V4L2_FIELD_INTERLACED_BT? */
-#ifndef V4L2_FIELD_INTERLACED_BT
-#define V4L2_FIELD_INTERLACED_BT 0xDEADBEEF /* define it as a constant that doesn't exist */
-#endif
-
-#ifndef V4L2_FIELD_INTERLACED_TB
-#define V4L2_FIELD_INTERLACED_TB 0xDEADBEED /* define it as a constant that doesn't exist */
-#endif
-
 static unsigned int		audio_sum_count = 0;
 static unsigned int		audio_sum_level[4] = {0,0,0,0};
 static unsigned int		audio_max_level[4] = {0,0,0,0};
