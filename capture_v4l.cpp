@@ -2802,6 +2802,14 @@ int main(int argc,char **argv) {
 							if (framt < 0) framt = 0;
 						}
 
+						/* Linux cx23885 hack: Why does the card report FIELD_INTERLACED for get/set FMT ioctls
+						 * and then report V4L2_FIELD_ANY here?????? Another complaint: If you capture VHS tapes
+						 * and the video signal is unstable in just the right way the captured fields change places.
+						 *
+						 * Also despite what the source code suggests, the driver will only accept FIELD_INTERLACED */
+						if (vb->field == V4L2_FIELD_ANY && v4l_fmt.fmt.pix.field == V4L2_FIELD_INTERLACED)
+							vb->field = V4L2_FIELD_INTERLACED;
+
 						v4l_interlaced = 0;
 						v4l_interlaced_woven = 1;
 						if (vb->field == V4L2_FIELD_NONE)
