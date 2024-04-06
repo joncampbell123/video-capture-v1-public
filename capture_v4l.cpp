@@ -2283,10 +2283,17 @@ void copy_yuyv_to_planar_yuv_422(unsigned char *framep[3],int stride[3],unsigned
 		 * field=vertical field position */
 		for (fc=0,field=(v4l_interlaced == 0)?1:0;fc < 2;fc++,field ^= 1) {
 			unsigned char *srf;
-			if (v4l_interlaced_woven)
-				srf = (unsigned char*)sdi + (fc * srcs);
-			else
+
+			if (v4l_interlaced_woven) {
+				if (swap_fields) /* dumbass capture card drivers */
+					srf = (unsigned char*)sdi + ((fc^1) * srcs);
+				else
+					srf = (unsigned char*)sdi + (fc * srcs);
+			}
+			else {
 				srf = (unsigned char*)sdi + (fc * hh * srcs);
+			}
+
 			/* 4:2:2 SDI -> 4:2:2 progressive scan */
 			for (y=field;y < render_height;y += 2) {
 				src = srf; srf += srcs*2;
@@ -2344,10 +2351,16 @@ void copy_uyvy_to_planar_yuv_422(unsigned char *framep[3],int stride[3],unsigned
 		 * field=vertical field position */
 		for (fc=0,field=(v4l_interlaced == 0)?1:0;fc < 2;fc++,field ^= 1) {
 			unsigned char *srf;
-			if (v4l_interlaced_woven)
-				srf = (unsigned char*)sdi + (fc * srcs);
-			else
+
+			if (v4l_interlaced_woven) {
+				if (swap_fields) /* dumbass capture card drivers */
+					srf = (unsigned char*)sdi + ((fc^1) * srcs);
+				else
+					srf = (unsigned char*)sdi + (fc * srcs);
+			}
+			else {
 				srf = (unsigned char*)sdi + (fc * hh * srcs);
+			}
 
 			/* 4:2:2 SDI -> 4:2:0 progressive scan */
 			for (y=field;y < render_height;y += 2) {
