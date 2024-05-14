@@ -536,6 +536,8 @@ static void open_avi_file() {
 		codec_id = AV_CODEC_ID_FFVHUFF; /* HuffYUV only supports RGB or 4:2:2 YUV, anything else needs FFMPEG's variant of it */
 	else if (want_codec_sel == "huffyuv-422")
 		codec_id = AV_CODEC_ID_HUFFYUV; /* HuffYUV supports RGB or 4:2:2 YUV, this works fine */
+	else if (want_codec_sel == "utvideo" || want_codec_sel == "utvideo-422")
+		codec_id = AV_CODEC_ID_UTVIDEO;
 
 	if (fmp4_codec == NULL) {
 		if ((fmp4_codec = avcodec_find_encoder(codec_id)) == NULL) {
@@ -617,6 +619,9 @@ static void open_avi_file() {
 		/* anything to do? */
 	}
 	else if (codec_id == AV_CODEC_ID_FFVHUFF) {
+		/* anything to do? */
+	}
+	else if (codec_id == AV_CODEC_ID_UTVIDEO) {
 		/* anything to do? */
 	}
 	else {
@@ -701,6 +706,9 @@ static void open_avi_file() {
         // any tweaks?
     }
     else if (codec_id == AV_CODEC_ID_FFVHUFF) {
+        // any tweaks?
+    }
+    else if (codec_id == AV_CODEC_ID_UTVIDEO) {
         // any tweaks?
     }
     else {
@@ -842,6 +850,8 @@ static void open_avi_file() {
 		AVI_video_fmt.biCompression = avi_fourcc_const('H','F','Y','U');
 	else if (codec_id == AV_CODEC_ID_FFVHUFF)
 		AVI_video_fmt.biCompression = avi_fourcc_const('F','F','V','H');
+	else if (codec_id == AV_CODEC_ID_UTVIDEO)
+		AVI_video_fmt.biCompression = (v4l_codec_yshr == 0) ? avi_fourcc_const('U','L','Y','2') : avi_fourcc_const('U','L','Y','0');
 	else
 		abort();
 	AVI_video_fmt.biSizeImage = v4l_width * v4l_height * 3;
@@ -851,7 +861,7 @@ static void open_avi_file() {
 	AVI_video_fmt.biClrImportant = 0;
 
 	/* HuffYUV: The bits_per_coded_sample field is very important because that is how HuffYUV differentiates between RGB and YUV */
-	if (codec_id == AV_CODEC_ID_HUFFYUV || codec_id == AV_CODEC_ID_FFVHUFF)
+	if (codec_id == AV_CODEC_ID_HUFFYUV || codec_id == AV_CODEC_ID_FFVHUFF || codec_id == AV_CODEC_ID_UTVIDEO)
 		AVI_video_fmt.biBitCount = fmp4_context->bits_per_coded_sample;
 
 	if (audio_channels != 0) {
@@ -1214,6 +1224,8 @@ static void help() {
 	fprintf(stderr,"                                                 h265-422      H.265/HEVC 4:2:2\n");
 	fprintf(stderr,"                                                 huffyuv       HuffYUV 4:2:0\n");
 	fprintf(stderr,"                                                 huffyuv-422   HuffYUV 4:2:2\n");
+	fprintf(stderr,"                                                 utvideo       Ut Video 4:2:0\n");
+	fprintf(stderr,"                                                 utvideo-422   Ut Video 4:2:2\n");
 	fprintf(stderr,"    -vbi                                   Also capture & record VBI\n");
 	fprintf(stderr,"    -vbi-all                               Capture & record ALL VBI data\n");
 	fprintf(stderr,"    -input-device <x>                      Card input to select\n");
@@ -1991,7 +2003,7 @@ int open_v4l() {
 		fprintf(stderr,"  format='%s'\n",tmp);
 
         /* FIXME: FFMPEG doesn't encode mpeg4 4:2:2? */
-		if ((want_codec_sel == "mpeg2-422" || want_codec_sel == "h264-422" || want_codec_sel == "h265-422" || want_codec_sel == "huffyuv-422") && (v4l_fmt.fmt.pix.pixelformat == V4L2_PIX_FMT_YUYV || v4l_fmt.fmt.pix.pixelformat == V4L2_PIX_FMT_UYVY)) {
+		if ((want_codec_sel == "mpeg2-422" || want_codec_sel == "h264-422" || want_codec_sel == "h265-422" || want_codec_sel == "huffyuv-422" || want_codec_sel == "utvideo-422") && (v4l_fmt.fmt.pix.pixelformat == V4L2_PIX_FMT_YUYV || v4l_fmt.fmt.pix.pixelformat == V4L2_PIX_FMT_UYVY)) {
 			v4l_codec_yshr = 0;
 		}
 		else {
