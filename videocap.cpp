@@ -3260,6 +3260,8 @@ static gint v4l_codec_dropdown_populate_and_select(GtkWidget *listbox,GtkListSto
 		"h264-422",
 		"h265",
 		"h265-422",
+		"huffyuv",
+		"huffyuv-422",
 		NULL
 	};
 	void **hints,**n;

@@ -519,19 +519,23 @@ static void open_avi_file() {
 		return;
 
 	v4l_basetime = -1;
-    v4l_last_frame = 0;
-    v4l_last_vbi = 0;
-    v4l_last_frame_delta = 0;
-    v4l_last_vbi_delta = 0;
+	v4l_last_frame = 0;
+	v4l_last_vbi = 0;
+	v4l_last_frame_delta = 0;
+	v4l_last_vbi_delta = 0;
 
-    if (want_codec_sel == "h265" || want_codec_sel == "h265-422")
-        codec_id = AV_CODEC_ID_H265;
-    else if (want_codec_sel == "h264" || want_codec_sel == "h264-422")
-        codec_id = AV_CODEC_ID_H264;
-    else if (want_codec_sel == "mpeg4" || want_codec_sel == "mpeg4-422")
-        codec_id = AV_CODEC_ID_MPEG4;
-    else if (want_codec_sel == "mpeg2" || want_codec_sel == "mpeg2-422")
-        codec_id = AV_CODEC_ID_MPEG2VIDEO;
+	if (want_codec_sel == "h265" || want_codec_sel == "h265-422")
+		codec_id = AV_CODEC_ID_H265;
+	else if (want_codec_sel == "h264" || want_codec_sel == "h264-422")
+		codec_id = AV_CODEC_ID_H264;
+	else if (want_codec_sel == "mpeg4" || want_codec_sel == "mpeg4-422")
+		codec_id = AV_CODEC_ID_MPEG4;
+	else if (want_codec_sel == "mpeg2" || want_codec_sel == "mpeg2-422")
+		codec_id = AV_CODEC_ID_MPEG2VIDEO;
+	else if (want_codec_sel == "huffyuv")
+		codec_id = AV_CODEC_ID_FFVHUFF; /* HuffYUV only supports RGB or 4:2:2 YUV, anything else needs FFMPEG's variant of it */
+	else if (want_codec_sel == "huffyuv-422")
+		codec_id = AV_CODEC_ID_HUFFYUV; /* HuffYUV supports RGB or 4:2:2 YUV, this works fine */
 
 	if (fmp4_codec == NULL) {
 		if ((fmp4_codec = avcodec_find_encoder(codec_id)) == NULL) {
@@ -553,65 +557,71 @@ static void open_avi_file() {
 	avcodec_get_context_defaults3(fmp4_context,fmp4_codec);
 #endif
 
-    if (codec_id == AV_CODEC_ID_H265) {
-        if (v4l_height >= 720) {
-            if (v4l_codec_yshr == 0)
-                fmp4_context->bit_rate = 22500000;
-            else
-                fmp4_context->bit_rate = 17500000;
-        }
-        else {
-            if (v4l_codec_yshr == 0)
-                fmp4_context->bit_rate = 15000000;
-            else
-                fmp4_context->bit_rate = 12000000;
-        }
-    }
-    else if (codec_id == AV_CODEC_ID_H264) {
-        if (v4l_height >= 720) {
-            if (v4l_codec_yshr == 0)
-                fmp4_context->bit_rate = 25000000;
-            else
-                fmp4_context->bit_rate = 20000000;
-        }
-        else {
-            if (v4l_codec_yshr == 0)
-                fmp4_context->bit_rate = 20000000;
-            else
-                fmp4_context->bit_rate = 15000000;
-        }
-    }
-    else if (codec_id == AV_CODEC_ID_MPEG4) {
-        if (v4l_height >= 720) {
-            if (v4l_codec_yshr == 0)
-                fmp4_context->bit_rate = 30000000;
-            else
-                fmp4_context->bit_rate = 25000000;
-        }
-        else {
-            if (v4l_codec_yshr == 0)
-                fmp4_context->bit_rate = 25000000;
-            else
-                fmp4_context->bit_rate = 20000000;
-        }
-    }
-    else if (codec_id == AV_CODEC_ID_MPEG2VIDEO) {
-        if (v4l_height >= 720) {
-            if (v4l_codec_yshr == 0)
-                fmp4_context->bit_rate = 75000000;
-            else
-                fmp4_context->bit_rate = 50000000;
-        }
-        else {
-            if (v4l_codec_yshr == 0)
-                fmp4_context->bit_rate = 35000000;
-            else
-                fmp4_context->bit_rate = 25000000;
-        }
-    }
-    else {
-        abort();
-    }
+	if (codec_id == AV_CODEC_ID_H265) {
+		if (v4l_height >= 720) {
+			if (v4l_codec_yshr == 0)
+				fmp4_context->bit_rate = 22500000;
+			else
+				fmp4_context->bit_rate = 17500000;
+		}
+		else {
+			if (v4l_codec_yshr == 0)
+				fmp4_context->bit_rate = 15000000;
+			else
+				fmp4_context->bit_rate = 12000000;
+		}
+	}
+	else if (codec_id == AV_CODEC_ID_H264) {
+		if (v4l_height >= 720) {
+			if (v4l_codec_yshr == 0)
+				fmp4_context->bit_rate = 25000000;
+			else
+				fmp4_context->bit_rate = 20000000;
+		}
+		else {
+			if (v4l_codec_yshr == 0)
+				fmp4_context->bit_rate = 20000000;
+			else
+				fmp4_context->bit_rate = 15000000;
+		}
+	}
+	else if (codec_id == AV_CODEC_ID_MPEG4) {
+		if (v4l_height >= 720) {
+			if (v4l_codec_yshr == 0)
+				fmp4_context->bit_rate = 30000000;
+			else
+				fmp4_context->bit_rate = 25000000;
+		}
+		else {
+			if (v4l_codec_yshr == 0)
+				fmp4_context->bit_rate = 25000000;
+			else
+				fmp4_context->bit_rate = 20000000;
+		}
+	}
+	else if (codec_id == AV_CODEC_ID_MPEG2VIDEO) {
+		if (v4l_height >= 720) {
+			if (v4l_codec_yshr == 0)
+				fmp4_context->bit_rate = 75000000;
+			else
+				fmp4_context->bit_rate = 50000000;
+		}
+		else {
+			if (v4l_codec_yshr == 0)
+				fmp4_context->bit_rate = 35000000;
+			else
+				fmp4_context->bit_rate = 25000000;
+		}
+	}
+	else if (codec_id == AV_CODEC_ID_HUFFYUV) {
+		/* anything to do? */
+	}
+	else if (codec_id == AV_CODEC_ID_FFVHUFF) {
+		/* anything to do? */
+	}
+	else {
+		abort();
+	}
 
 	fmp4_context->keyint_min = AVI_FRAMES_PER_GROUP;
 	fmp4_context->time_base.num = v4l_framerate_d; /* NTS: ffmpeg means time interval as "amount of time between frames" */
@@ -685,6 +695,12 @@ static void open_avi_file() {
         // any tweaks?
     }
     else if (codec_id == AV_CODEC_ID_MPEG2VIDEO) {
+        // any tweaks?
+    }
+    else if (codec_id == AV_CODEC_ID_HUFFYUV) {
+        // any tweaks?
+    }
+    else if (codec_id == AV_CODEC_ID_FFVHUFF) {
         // any tweaks?
     }
     else {
@@ -814,21 +830,29 @@ static void open_avi_file() {
 	AVI_video_fmt.biHeight = v4l_height;
 	AVI_video_fmt.biPlanes = 1;
 	AVI_video_fmt.biBitCount = 24;
-    if (codec_id == AV_CODEC_ID_H265)
-        AVI_video_fmt.biCompression = avi_fourcc_const('h','e','v','1');
-    else if (codec_id == AV_CODEC_ID_H264)
-        AVI_video_fmt.biCompression = avi_fourcc_const('H','2','6','4');
-    else if (codec_id == AV_CODEC_ID_MPEG4)
-        AVI_video_fmt.biCompression = avi_fourcc_const('F','M','P','4');
-    else if (codec_id == AV_CODEC_ID_MPEG2VIDEO)
-        AVI_video_fmt.biCompression = avi_fourcc_const('m','p','g','2');
-    else
-        abort();
+	if (codec_id == AV_CODEC_ID_H265)
+		AVI_video_fmt.biCompression = avi_fourcc_const('h','e','v','1');
+	else if (codec_id == AV_CODEC_ID_H264)
+		AVI_video_fmt.biCompression = avi_fourcc_const('H','2','6','4');
+	else if (codec_id == AV_CODEC_ID_MPEG4)
+		AVI_video_fmt.biCompression = avi_fourcc_const('F','M','P','4');
+	else if (codec_id == AV_CODEC_ID_MPEG2VIDEO)
+		AVI_video_fmt.biCompression = avi_fourcc_const('m','p','g','2');
+	else if (codec_id == AV_CODEC_ID_HUFFYUV)
+		AVI_video_fmt.biCompression = avi_fourcc_const('H','F','Y','U');
+	else if (codec_id == AV_CODEC_ID_FFVHUFF)
+		AVI_video_fmt.biCompression = avi_fourcc_const('F','F','V','H');
+	else
+		abort();
 	AVI_video_fmt.biSizeImage = v4l_width * v4l_height * 3;
 	AVI_video_fmt.biXPelsPerMeter = 0;
 	AVI_video_fmt.biYPelsPerMeter = 0;
 	AVI_video_fmt.biClrUsed = 0;
 	AVI_video_fmt.biClrImportant = 0;
+
+	/* HuffYUV: The bits_per_coded_sample field is very important because that is how HuffYUV differentiates between RGB and YUV */
+	if (codec_id == AV_CODEC_ID_HUFFYUV || codec_id == AV_CODEC_ID_FFVHUFF)
+		AVI_video_fmt.biBitCount = fmp4_context->bits_per_coded_sample;
 
 	if (audio_channels != 0) {
 		AVI_audio_fmt.wFormatTag = windows_WAVE_FORMAT_PCM;
@@ -894,10 +918,25 @@ static void open_avi_file() {
 		return;
 	}
 
-	if (!avi_writer_stream_set_format(AVI_video,&AVI_video_fmt,sizeof(windows_BITMAPINFOHEADER))) {
-		fprintf(stderr,"Unable to set audio stream format\n");
-		close_avi_file();
-		return;
+	{
+		unsigned char tmp[4096];
+		size_t tmp_sz = 0;
+
+		memcpy(tmp+tmp_sz,&AVI_video_fmt,sizeof(windows_BITMAPINFOHEADER));
+		tmp_sz += sizeof(windows_BITMAPINFOHEADER);
+
+		if (fmp4_context->extradata && fmp4_context->extradata_size != 0) {
+			fprintf(stderr,"Video codec: %u bytes extradata\n",fmp4_context->extradata_size);
+			memcpy(tmp+tmp_sz,fmp4_context->extradata,fmp4_context->extradata_size);
+			tmp_sz += fmp4_context->extradata_size;
+			assert(tmp_sz <= sizeof(tmp));
+		}
+
+		if (!avi_writer_stream_set_format(AVI_video,tmp,tmp_sz)) {
+			fprintf(stderr,"Unable to set audio stream format\n");
+			close_avi_file();
+			return;
+		}
 	}
 	if ((strhdr = avi_writer_stream_header(AVI_video)) == NULL) {
 		fprintf(stderr,"Unable to set audio stream header\n");
@@ -930,19 +969,35 @@ static void open_avi_file() {
 		AVI_vbi_video_fmt.biWidth = vbi_width;
 		AVI_vbi_video_fmt.biHeight = vbi_height;
 		AVI_vbi_video_fmt.biPlanes = 1;
-        AVI_vbi_video_fmt.biBitCount = 24;
-        AVI_vbi_video_fmt.biCompression = AVI_video_fmt.biCompression;
-        AVI_vbi_video_fmt.biSizeImage = vbi_width * vbi_height * 3;
+		AVI_vbi_video_fmt.biBitCount = AVI_video_fmt.biBitCount;
+		AVI_vbi_video_fmt.biCompression = AVI_video_fmt.biCompression;
+		AVI_vbi_video_fmt.biSizeImage = vbi_width * vbi_height * 3;
 		AVI_vbi_video_fmt.biXPelsPerMeter = 0;
 		AVI_vbi_video_fmt.biYPelsPerMeter = 0;
 		AVI_vbi_video_fmt.biClrUsed = 0;
 		AVI_vbi_video_fmt.biClrImportant = 0;
 
-		if (!avi_writer_stream_set_format(AVI_vbi_video,&AVI_vbi_video_fmt,sizeof(windows_BITMAPINFOHEADER))) {
-			fprintf(stderr,"Unable to set audio stream format\n");
-			close_avi_file();
-			return;
+		{
+			unsigned char tmp[4096];
+			size_t tmp_sz = 0;
+
+			memcpy(tmp+tmp_sz,&AVI_vbi_video_fmt,sizeof(windows_BITMAPINFOHEADER));
+			tmp_sz += sizeof(windows_BITMAPINFOHEADER);
+
+			if (fmp4_vbi_context->extradata && fmp4_vbi_context->extradata_size != 0) {
+				fprintf(stderr,"VBI codec: %u bytes extradata\n",fmp4_vbi_context->extradata_size);
+				memcpy(tmp+tmp_sz,fmp4_vbi_context->extradata,fmp4_vbi_context->extradata_size);
+				tmp_sz += fmp4_vbi_context->extradata_size;
+				assert(tmp_sz <= sizeof(tmp));
+			}
+
+			if (!avi_writer_stream_set_format(AVI_vbi_video,tmp,tmp_sz)) {
+				fprintf(stderr,"Unable to set audio stream format\n");
+				close_avi_file();
+				return;
+			}
 		}
+
 		if ((strhdr = avi_writer_stream_header(AVI_vbi_video)) == NULL) {
 			fprintf(stderr,"Unable to set audio stream header\n");
 			close_avi_file();
@@ -1149,14 +1204,16 @@ static void help() {
 	fprintf(stderr,"    -cw <n>                                Width crop rect coordinate\n");
 	fprintf(stderr,"    -ch <n>                                Height crop rect coordinate\n");
 	fprintf(stderr,"    -codec <n>                             Codec.\n");
-	fprintf(stderr,"                                                 mpeg2     MPEG-2 4:2:0\n");
-	fprintf(stderr,"                                                 mpeg2-422 MPEG-2 4:2:2\n");
-	fprintf(stderr,"                                                 mpeg4     MPEG-4 4:2:0\n");
-	fprintf(stderr,"                                                 mpeg4-422 MPEG-4 4:2:2\n");
-	fprintf(stderr,"                                                 h264      H.264/AVC 4:2:0\n");
-	fprintf(stderr,"                                                 h264-422  H.264/AVC 4:2:2\n");
-	fprintf(stderr,"                                                 h265      H.265/HEVC 4:2:0\n");
-	fprintf(stderr,"                                                 h265-422  H.265/HEVC 4:2:2\n");
+	fprintf(stderr,"                                                 mpeg2         MPEG-2 4:2:0\n");
+	fprintf(stderr,"                                                 mpeg2-422     MPEG-2 4:2:2\n");
+	fprintf(stderr,"                                                 mpeg4         MPEG-4 4:2:0\n");
+	fprintf(stderr,"                                                 mpeg4-422     MPEG-4 4:2:2\n");
+	fprintf(stderr,"                                                 h264          H.264/AVC 4:2:0\n");
+	fprintf(stderr,"                                                 h264-422      H.264/AVC 4:2:2\n");
+	fprintf(stderr,"                                                 h265          H.265/HEVC 4:2:0\n");
+	fprintf(stderr,"                                                 h265-422      H.265/HEVC 4:2:2\n");
+	fprintf(stderr,"                                                 huffyuv       HuffYUV 4:2:0\n");
+	fprintf(stderr,"                                                 huffyuv-422   HuffYUV 4:2:2\n");
 	fprintf(stderr,"    -vbi                                   Also capture & record VBI\n");
 	fprintf(stderr,"    -vbi-all                               Capture & record ALL VBI data\n");
 	fprintf(stderr,"    -input-device <x>                      Card input to select\n");
@@ -1934,7 +1991,7 @@ int open_v4l() {
 		fprintf(stderr,"  format='%s'\n",tmp);
 
         /* FIXME: FFMPEG doesn't encode mpeg4 4:2:2? */
-		if ((want_codec_sel == "mpeg2-422" || want_codec_sel == "h264-422" || want_codec_sel == "h265-422") && (v4l_fmt.fmt.pix.pixelformat == V4L2_PIX_FMT_YUYV || v4l_fmt.fmt.pix.pixelformat == V4L2_PIX_FMT_UYVY)) {
+		if ((want_codec_sel == "mpeg2-422" || want_codec_sel == "h264-422" || want_codec_sel == "h265-422" || want_codec_sel == "huffyuv-422") && (v4l_fmt.fmt.pix.pixelformat == V4L2_PIX_FMT_YUYV || v4l_fmt.fmt.pix.pixelformat == V4L2_PIX_FMT_UYVY)) {
 			v4l_codec_yshr = 0;
 		}
 		else {
