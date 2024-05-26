@@ -309,7 +309,9 @@ GtkWidget*			input_dialog_def_crop = NULL;
 GtkWidget*			input_dialog_bounds_crop = NULL;
 GtkWidget*          		input_dialog_async_io = NULL;
 GtkWidget*			input_dialog_swap_fields = NULL;
-GtkWidget*          input_dialog_jpeg_yuv = NULL;
+GtkWidget*			input_dialog_jpeg_yuv = NULL;
+GtkWidget*			input_dialog_brightness = NULL;
+GtkWidget*			input_dialog_contrast = NULL;
 GtkWidget*			audio_dialog = NULL;
 GtkWidget*			audio_dialog_device = NULL;
 GtkWidget*			audio_dialog_enable = NULL;
@@ -2629,7 +2631,7 @@ bool InputManager::start_process_video4linux() {
 	}
 
 	if (contrast_adj != 0) {
-		sprintf(param_br,"%.6f",(double)contrast_adj / 10000);
+		sprintf(param_cntrst,"%.6f",(double)contrast_adj / 10000);
 		argv[argc++] = "--contrast";
 		argv[argc++] = param_cntrst;
 	}
@@ -3792,6 +3794,13 @@ static void update_input_dialog_from_vars() {
 
 	gtk_combo_box_set_active (GTK_COMBO_BOX(input_dialog_force_interlace), active);
 
+	/* brightness */
+	sprintf(tmp,"%d",CurrentInputObj()->brightness_adj);
+	gtk_entry_set_text (GTK_ENTRY(input_dialog_brightness), tmp);
+
+	/* contrast */
+	sprintf(tmp,"%d",CurrentInputObj()->contrast_adj);
+	gtk_entry_set_text (GTK_ENTRY(input_dialog_contrast), tmp);
 }
 
 static void update_backend_dialog_from_vars() {
@@ -3996,10 +4005,10 @@ static bool update_vars_from_input_dialog() {
 	active = gtk_combo_box_get_active (GTK_COMBO_BOX(input_dialog_capfps));
 	model = gtk_combo_box_get_model (GTK_COMBO_BOX(input_dialog_capfps));
 
-    double old_capf = CurrentInputObj()->capture_fps;
+	double old_capf = CurrentInputObj()->capture_fps;
 
-    CurrentInputObj()->capture_fps = -1;
-    if (model != NULL && active >= 0) {
+	CurrentInputObj()->capture_fps = -1;
+	if (model != NULL && active >= 0) {
 		GtkTreeIter iter;
 		char *str;
 		GValue v;
@@ -4085,6 +4094,30 @@ static bool update_vars_from_input_dialog() {
 
 	if (old_force_interlace != CurrentInputObj()->force_interlace)
 		do_reopen = true;
+
+	/* brightness */
+	{
+		const gchar *t = gtk_entry_get_text (GTK_ENTRY(input_dialog_brightness));
+		int pv = CurrentInputObj()->brightness_adj;
+		if (t) {
+			pv = atoi(t);
+			if (CurrentInputObj()->brightness_adj != pv) {
+				CurrentInputObj()->brightness_adj = pv;
+			}
+		}
+	}
+
+	/* contrast */
+	{
+		const gchar *t = gtk_entry_get_text (GTK_ENTRY(input_dialog_contrast));
+		int pv = CurrentInputObj()->contrast_adj;
+		if (t) {
+			pv = atoi(t);
+			if (CurrentInputObj()->contrast_adj != pv) {
+				CurrentInputObj()->contrast_adj = pv;
+			}
+		}
+	}
 
 	return do_reopen;
 }
@@ -4565,6 +4598,28 @@ void create_input_dialog() {
 		gtk_cell_layout_pack_start(GTK_CELL_LAYOUT(input_dialog_force_interlace), cell, TRUE);
 		gtk_cell_layout_set_attributes(GTK_CELL_LAYOUT(input_dialog_force_interlace), cell, "text", 0, NULL);
 	}
+
+	gtk_container_add (GTK_CONTAINER(vbox), hbox);
+
+	/* brightness */
+	hbox = gtk_hbox_new (FALSE, 0);
+
+	label = gtk_label_new ("Brightness adjust (-10000 to 10000)");
+	gtk_container_add (GTK_CONTAINER(hbox), label);
+
+	input_dialog_brightness = gtk_entry_new ();
+	gtk_container_add (GTK_CONTAINER(hbox), input_dialog_brightness);
+
+	gtk_container_add (GTK_CONTAINER(vbox), hbox);
+
+	/* contrast */
+	hbox = gtk_hbox_new (FALSE, 0);
+
+	label = gtk_label_new ("Contrast adjust (-10000 to 10000)");
+	gtk_container_add (GTK_CONTAINER(hbox), label);
+
+	input_dialog_contrast = gtk_entry_new ();
+	gtk_container_add (GTK_CONTAINER(hbox), input_dialog_contrast);
 
 	gtk_container_add (GTK_CONTAINER(vbox), hbox);
 
