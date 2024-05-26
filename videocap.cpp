@@ -166,6 +166,7 @@ public:
 public:
 	void onRecord(bool on);
 	void onActivate(bool on);
+	void update_brightcontrast();
 	void start_recording();
 	void stop_recording();
 	void socket_command(const char *msg);
@@ -1268,6 +1269,28 @@ void InputManager::inputs_scan(const bool force) {
 		close(fd);
 		fd = -1;
 	}
+}
+
+void InputManager::update_brightcontrast() {
+	char tmp[512];
+
+	if (index == VIEW_INPUT_OFF) return;
+
+	/* wait for the socket */
+	while (socket_fd < 0) {
+		if (cap_pid < 0) return;
+		usleep(20000);
+		idle();
+	}
+
+	/* flush socket input */
+	while (idle_socket());
+
+	sprintf(tmp,"bright %.6f",(double)brightness_adj / 10000);
+	socket_command(tmp);
+
+	sprintf(tmp,"contrast %.6f",(double)contrast_adj / 10000);
+	socket_command(tmp);
 }
 
 void InputManager::start_recording() {
@@ -4095,6 +4118,8 @@ static bool update_vars_from_input_dialog() {
 	if (old_force_interlace != CurrentInputObj()->force_interlace)
 		do_reopen = true;
 
+	bool update_bc = false;
+
 	/* brightness */
 	{
 		const gchar *t = gtk_entry_get_text (GTK_ENTRY(input_dialog_brightness));
@@ -4103,6 +4128,7 @@ static bool update_vars_from_input_dialog() {
 			pv = atoi(t);
 			if (CurrentInputObj()->brightness_adj != pv) {
 				CurrentInputObj()->brightness_adj = pv;
+				update_bc = true;
 			}
 		}
 	}
@@ -4115,9 +4141,12 @@ static bool update_vars_from_input_dialog() {
 			pv = atoi(t);
 			if (CurrentInputObj()->contrast_adj != pv) {
 				CurrentInputObj()->contrast_adj = pv;
+				update_bc = true;
 			}
 		}
 	}
+
+	if (update_bc) CurrentInputObj()->update_brightcontrast();
 
 	return do_reopen;
 }
@@ -4380,6 +4409,38 @@ void create_backend_dialog() {
 	gtk_dialog_set_default_response (GTK_DIALOG(backend_dialog), GTK_RESPONSE_APPLY);
 }
 
+void on_input_dialog_brightcontrast_change(GtkEntry *widget,gpointer user_data) {
+	bool update_bc = false;
+
+	/* brightness */
+	{
+		const gchar *t = gtk_entry_get_text (GTK_ENTRY(input_dialog_brightness));
+		int pv = CurrentInputObj()->brightness_adj;
+		if (t) {
+			pv = atoi(t);
+			if (CurrentInputObj()->brightness_adj != pv) {
+				CurrentInputObj()->brightness_adj = pv;
+				update_bc = true;
+			}
+		}
+	}
+
+	/* contrast */
+	{
+		const gchar *t = gtk_entry_get_text (GTK_ENTRY(input_dialog_contrast));
+		int pv = CurrentInputObj()->contrast_adj;
+		if (t) {
+			pv = atoi(t);
+			if (CurrentInputObj()->contrast_adj != pv) {
+				CurrentInputObj()->contrast_adj = pv;
+				update_bc = true;
+			}
+		}
+	}
+
+	if (update_bc) CurrentInputObj()->update_brightcontrast();
+}
+
 void on_input_dialog_video_index_change(GtkComboBox *widget,gpointer user_data) {
 	/* hack! */
 	const int oldindex = CurrentInputObj()->video_index;
@@ -4612,6 +4673,10 @@ void create_input_dialog() {
 
 	gtk_container_add (GTK_CONTAINER(vbox), hbox);
 
+	g_signal_connect(input_dialog_brightness, "changed",
+		G_CALLBACK(on_input_dialog_brightcontrast_change),
+		NULL);
+
 	/* contrast */
 	hbox = gtk_hbox_new (FALSE, 0);
 
@@ -4622,6 +4687,10 @@ void create_input_dialog() {
 	gtk_container_add (GTK_CONTAINER(hbox), input_dialog_contrast);
 
 	gtk_container_add (GTK_CONTAINER(vbox), hbox);
+
+	g_signal_connect(input_dialog_contrast, "changed",
+		G_CALLBACK(on_input_dialog_brightcontrast_change),
+		NULL);
 
 	/* Enable X SHM extension */
 	hbox = gtk_hbox_new (FALSE, 0);

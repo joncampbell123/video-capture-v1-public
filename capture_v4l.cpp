@@ -1575,6 +1575,8 @@ void apply_v4l_controls(void) {
 	struct v4l2_queryctrl qc;
 	struct v4l2_control cc;
 
+	if (v4l_fd < 0) return;
+
 	memset(&qc,0,sizeof(qc));
 	memset(&cc,0,sizeof(cc));
 	cc.id = qc.id = V4L2_CID_BRIGHTNESS;
@@ -2726,7 +2728,19 @@ void process_socket_io() {
 	n = strchr(msg,'\n');
 	if (n) *n++ = 0;
 
-	if (!strcmp(msg,"capture-on")) {
+	if (!strncmp(msg,"bright ",7)) {
+		char *v = msg + 7;
+		while (*v == ' ') v++;
+		v4l_brightness = (int)(atof(v) * 10000);
+		apply_v4l_controls();
+	}
+	else if (!strncmp(msg,"contrast ",9)) {
+		char *v = msg + 9;
+		while (*v == ' ') v++;
+		v4l_contrast = (int)(atof(v) * 10000);
+		apply_v4l_controls();
+	}
+	else if (!strcmp(msg,"capture-on")) {
 		auto_v4l_v4l = true;
 	}
 	else if (!strcmp(msg,"capture-off")) {
