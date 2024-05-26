@@ -4125,10 +4125,13 @@ static bool update_vars_from_input_dialog() {
 		const gchar *t = gtk_entry_get_text (GTK_ENTRY(input_dialog_brightness));
 		int pv = CurrentInputObj()->brightness_adj;
 		if (t) {
-			pv = atoi(t);
-			if (CurrentInputObj()->brightness_adj != pv) {
-				CurrentInputObj()->brightness_adj = pv;
-				update_bc = true;
+			while (*t == ' ') t++;
+			if (*t) {
+				pv = atoi(t);
+				if (CurrentInputObj()->brightness_adj != pv) {
+					CurrentInputObj()->brightness_adj = pv;
+					update_bc = true;
+				}
 			}
 		}
 	}
@@ -4138,10 +4141,13 @@ static bool update_vars_from_input_dialog() {
 		const gchar *t = gtk_entry_get_text (GTK_ENTRY(input_dialog_contrast));
 		int pv = CurrentInputObj()->contrast_adj;
 		if (t) {
-			pv = atoi(t);
-			if (CurrentInputObj()->contrast_adj != pv) {
-				CurrentInputObj()->contrast_adj = pv;
-				update_bc = true;
+			while (*t == ' ') t++;
+			if (*t) {
+				pv = atoi(t);
+				if (CurrentInputObj()->contrast_adj != pv) {
+					CurrentInputObj()->contrast_adj = pv;
+					update_bc = true;
+				}
 			}
 		}
 	}
@@ -4417,10 +4423,13 @@ void on_input_dialog_brightcontrast_change(GtkEntry *widget,gpointer user_data) 
 		const gchar *t = gtk_entry_get_text (GTK_ENTRY(input_dialog_brightness));
 		int pv = CurrentInputObj()->brightness_adj;
 		if (t) {
-			pv = atoi(t);
-			if (CurrentInputObj()->brightness_adj != pv) {
-				CurrentInputObj()->brightness_adj = pv;
-				update_bc = true;
+			while (*t == ' ') t++;
+			if (*t) {
+				pv = atoi(t);
+				if (CurrentInputObj()->brightness_adj != pv) {
+					CurrentInputObj()->brightness_adj = pv;
+					update_bc = true;
+				}
 			}
 		}
 	}
@@ -4430,10 +4439,13 @@ void on_input_dialog_brightcontrast_change(GtkEntry *widget,gpointer user_data) 
 		const gchar *t = gtk_entry_get_text (GTK_ENTRY(input_dialog_contrast));
 		int pv = CurrentInputObj()->contrast_adj;
 		if (t) {
-			pv = atoi(t);
-			if (CurrentInputObj()->contrast_adj != pv) {
-				CurrentInputObj()->contrast_adj = pv;
-				update_bc = true;
+			while (*t == ' ') t++;
+			if (*t) {
+				pv = atoi(t);
+				if (CurrentInputObj()->contrast_adj != pv) {
+					CurrentInputObj()->contrast_adj = pv;
+					update_bc = true;
+				}
 			}
 		}
 	}
