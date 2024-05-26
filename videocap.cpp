@@ -193,6 +193,10 @@ public:
 	int				user_ar_n,user_ar_d;
 	int				source_ar_n,source_ar_d;
 
+	/* capture card controls */
+	int				brightness_adj = 0;
+	int				contrast_adj = 0;
+
 	/* zebra marking */
 	int				zebra;
 
@@ -566,6 +570,10 @@ void load_config_section_input(const char *name,const char *value) {
 		iobj->jpeg_yuv = atoi(value) > 0;
 	else if (!strcmp(name,"zebra"))
 		iobj->zebra = atoi(value);
+	else if (!strcmp(name,"brightness adjust"))
+		iobj->brightness_adj = atoi(value);
+	else if (!strcmp(name,"contrast adjust"))
+		iobj->contrast_adj = atoi(value);
 	else if (!strcmp(name,"aspect ratio")) {
 		iobj->user_ar_n = iobj->user_ar_d = -1;
 
@@ -786,6 +794,8 @@ void save_configuration() {
 			fprintf(fp,"async io = %d\n",iobj->async_io);
 			fprintf(fp,"zebra = %d\n",iobj->zebra);
 			fprintf(fp,"codec = %s\n",iobj->input_codec.c_str());
+			fprintf(fp,"brightness adjust = %d\n",iobj->brightness_adj);
+			fprintf(fp,"contrast adjust = %d\n",iobj->contrast_adj);
 
 			if (iobj->user_ar_n >= 1 && iobj->user_ar_d >= 1)
 				fprintf(fp,"aspect ratio = %d:%d\n",iobj->user_ar_n,iobj->user_ar_d);
@@ -2534,7 +2544,7 @@ bool InputManager::start_process() {
 bool InputManager::start_process_video4linux() {
 	struct stat st;
 	struct sockaddr_un un;
-	char tmp[256],param_1[64],param_2[64];
+	char tmp[256],param_1[64],param_2[64],param_br[64],param_cntrst[64];
 	const char *argv[256];
 	string cwd;
 	int argc;
@@ -2610,6 +2620,18 @@ bool InputManager::start_process_video4linux() {
 
 	if (enable_vbi) {
 		argv[argc++] = "--vbi";
+	}
+
+	if (brightness_adj != 0) {
+		sprintf(param_br,"%.6f",(double)brightness_adj / 10000);
+		argv[argc++] = "--bright";
+		argv[argc++] = param_br;
+	}
+
+	if (contrast_adj != 0) {
+		sprintf(param_br,"%.6f",(double)contrast_adj / 10000);
+		argv[argc++] = "--contrast";
+		argv[argc++] = param_cntrst;
 	}
 
 	if (enable_audio) {
