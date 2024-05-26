@@ -262,6 +262,8 @@ static int			v4l_fd = -1;
 static struct v4l2_buffer	v4l_buf[30];
 static unsigned char*		v4l_ptr[30]={NULL};
 static double			v4l_basetime = -1;
+static int			v4l_brightness = 0; /* -10000...10000 */
+static int			v4l_contrast = 0; /* -10000...10000 */
 
 static int field_opposite(const int x) {
 	if (x >= 0)
@@ -1206,7 +1208,7 @@ static void help() {
 	fprintf(stderr,"    -socket <n>                            Socket location\n");
 	fprintf(stderr,"    -width <n>                             Capture width\n");
 	fprintf(stderr,"    -height <n>                            Capture height\n");
-    fprintf(stderr,"    -async-io                              Use asynchronous disk I/O (recommended)\n");
+	fprintf(stderr,"    -async-io                              Use asynchronous disk I/O (recommended)\n");
 	fprintf(stderr,"    -cropbound                             Set crop rect to bounds rect\n");
 	fprintf(stderr,"    -cropdef                               Set crop rect to default rect\n");
 	fprintf(stderr,"    -cx <n>                                Left crop rect coordinate\n");
@@ -1232,11 +1234,13 @@ static void help() {
 	fprintf(stderr,"    -input-standard <x>                    Video standard to select\n");
 	fprintf(stderr,"    -vcr-hack <x>                          Crop x lines from bottom\n");
 	fprintf(stderr,"    -vbi-first <x>                         Open VBI first, then init video (1=yes 0=no -1=auto)\n");
-    fprintf(stderr,"    -no-vbi-sysfs                          Don't use sysfs to find vbi device\n");
-    fprintf(stderr,"    -fps <n>                               Capture fps\n");
-    fprintf(stderr,"    -jpeg-yuv                              YUV is JPEG scale (0-255), else broadcast (16-235)\n");
-    fprintf(stderr,"    -swap-fields                           Swap fields, broken capture cards\n");
-    fprintf(stderr,"    -fil <top|bottom|p>                    Force field order in case the capture card fails to report it properly\n");
+	fprintf(stderr,"    -no-vbi-sysfs                          Don't use sysfs to find vbi device\n");
+	fprintf(stderr,"    -fps <n>                               Capture fps\n");
+	fprintf(stderr,"    -jpeg-yuv                              YUV is JPEG scale (0-255), else broadcast (16-235)\n");
+	fprintf(stderr,"    -swap-fields                           Swap fields, broken capture cards\n");
+	fprintf(stderr,"    -fil <top|bottom|p>                    Force field order in case the capture card fails to report it properly\n");
+	fprintf(stderr,"    -bright <x>                            Adjust capture card brightness (-1.0) to 1.0)\n");
+	fprintf(stderr,"    -contrast <x>                          Adjust capture card contrast (-1.0) to 1.0)\n");
 }
 
 static int parse_argv(int argc,char **argv) {
@@ -1253,24 +1257,38 @@ static int parse_argv(int argc,char **argv) {
 				help();
 				return 1;
 			}
-            else if (!strcmp(a,"fil")) {
-                a = argv[i++];
-                if (a == NULL) return 1;
-                /* force interlacing if the capture card for some reason fails to report interlacing
-                 * (looking at you, Linux Happauage PCI-e capture card drivers!) */
-                if (!strcmp(a,"top"))
-                    v4l_force_interlaced = 0;
-                else if (!strcmp(a,"bottom"))
-                    v4l_force_interlaced = 1;
-                else if (!strcmp(a,"p"))
-                    v4l_force_interlaced = -1;
-            }
-            else if (!strcmp(a,"jpeg-yuv")) {
-                jpeg_yuv = true;
-            }
-            else if (!strcmp(a,"no-vbi-sysfs")) {
-                v4l_vbi_via_sysfs = false;
-            }
+			else if (!strcmp(a,"bright")) {
+				a = argv[i++];
+				if (a == NULL) return 1;
+				v4l_brightness = (int)(atof(a) * 10000);
+				if (v4l_brightness < -10000) v4l_brightness = -10000;
+				if (v4l_brightness >  10000) v4l_brightness =  10000;
+			}
+			else if (!strcmp(a,"contrast")) {
+				a = argv[i++];
+				if (a == NULL) return 1;
+				v4l_contrast = (int)(atof(a) * 10000);
+				if (v4l_contrast < -10000) v4l_contrast = -10000;
+				if (v4l_contrast >  10000) v4l_contrast =  10000;
+			}
+			else if (!strcmp(a,"fil")) {
+				a = argv[i++];
+				if (a == NULL) return 1;
+				/* force interlacing if the capture card for some reason fails to report interlacing
+				 * (looking at you, Linux Happauage PCI-e capture card drivers!) */
+				if (!strcmp(a,"top"))
+					v4l_force_interlaced = 0;
+				else if (!strcmp(a,"bottom"))
+					v4l_force_interlaced = 1;
+				else if (!strcmp(a,"p"))
+					v4l_force_interlaced = -1;
+			}
+			else if (!strcmp(a,"jpeg-yuv")) {
+				jpeg_yuv = true;
+			}
+			else if (!strcmp(a,"no-vbi-sysfs")) {
+				v4l_vbi_via_sysfs = false;
+			}
 			else if (!strcmp(a,"vbi-first")) {
 				v4l_open_vbi_first = atoi(argv[i++]);
 			}
@@ -1551,6 +1569,53 @@ void close_v4l() {
 
 	if (v4l_fd >= 0) close(v4l_fd);
 	v4l_fd = -1;
+}
+
+void apply_v4l_controls(void) {
+	struct v4l2_queryctrl qc;
+	struct v4l2_control cc;
+
+	memset(&qc,0,sizeof(qc));
+	memset(&cc,0,sizeof(cc));
+	cc.id = qc.id = V4L2_CID_BRIGHTNESS;
+	if (ioctl(v4l_fd,VIDIOC_QUERYCTRL, &qc) >= 0 && !(qc.flags & V4L2_CTRL_FLAG_DISABLED)) {
+		if (v4l_brightness != 0 && qc.minimum < qc.maximum) {
+			const signed long range = (qc.maximum - qc.minimum);
+			cc.value = qc.default_value + ((range * (signed long)v4l_brightness) / 20000l);
+			if (cc.value < qc.minimum) cc.value = qc.minimum;
+			if (cc.value > qc.maximum) cc.value = qc.maximum;
+		}
+		else {
+			cc.value = qc.default_value;
+		}
+
+		bool ok = false;
+		if (ioctl(v4l_fd,VIDIOC_S_CTRL,&cc) >= 0) ok = true;
+
+		fprintf(stderr,"V4L brightness set: min=%d/val=%d/max=%d/def=%d ok=%u\n",
+			qc.minimum,cc.value,qc.maximum,qc.default_value,ok);
+	}
+
+	memset(&qc,0,sizeof(qc));
+	memset(&cc,0,sizeof(cc));
+	cc.id = qc.id = V4L2_CID_CONTRAST;
+	if (ioctl(v4l_fd,VIDIOC_QUERYCTRL, &qc) >= 0 && !(qc.flags & V4L2_CTRL_FLAG_DISABLED)) {
+		if (v4l_contrast != 0 && qc.minimum < qc.maximum) {
+			const signed long range = (qc.maximum - qc.minimum);
+			cc.value = qc.default_value + ((range * (signed long)v4l_contrast) / 20000l);
+			if (cc.value < qc.minimum) cc.value = qc.minimum;
+			if (cc.value > qc.maximum) cc.value = qc.maximum;
+		}
+		else {
+			cc.value = qc.default_value;
+		}
+
+		bool ok = false;
+		if (ioctl(v4l_fd,VIDIOC_S_CTRL,&cc) >= 0) ok = true;
+
+		fprintf(stderr,"V4L contrast set: min=%d/val=%d/max=%d/def=%d ok=%u\n",
+			qc.minimum,cc.value,qc.maximum,qc.default_value,ok);
+	}
 }
 
 int open_v4l() {
@@ -2320,6 +2385,8 @@ int open_v4l() {
 		xx->header = LIVE_SHM_HEADER;
 		asm volatile("" ::: "memory"); // complete writes FIRST before proceeding
 	}
+
+	apply_v4l_controls();
 
 	if (auto_v4l_avi && v4l_fd >= 0) open_avi_file();
 	return 0;
