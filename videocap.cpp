@@ -566,6 +566,25 @@ void load_config_section_input(const char *name,const char *value) {
 		iobj->jpeg_yuv = atoi(value) > 0;
 	else if (!strcmp(name,"zebra"))
 		iobj->zebra = atoi(value);
+	else if (!strcmp(name,"aspect ratio")) {
+		iobj->user_ar_n = iobj->user_ar_d = -1;
+
+		int n = -1,d = -1;
+
+		char *s = (char*)value;
+		if (isdigit(*s)) {
+			n = strtol(s,&s,10);
+			if (*s == ':') s++;
+		}
+		if (isdigit(*s)) {
+			d = strtol(s,&s,10);
+		}
+
+		if (n >= 1 && d >= 1) {
+			iobj->user_ar_n = n;
+			iobj->user_ar_d = d;
+		}
+	}
 	else if (!strcmp(name,"crop")) {
 		iobj->crop_defrect = iobj->crop_bounds = false;
 		iobj->crop_left = iobj->crop_top = iobj->crop_width = iobj->crop_height = CROP_DEFAULT;
@@ -761,12 +780,15 @@ void save_configuration() {
 			fprintf(fp,"capture width = %d\n",iobj->capture_width);
 			fprintf(fp,"capture height = %d\n",iobj->capture_height);
 			fprintf(fp,"vcr hack = %s\n",iobj->vcrhack.c_str());
-            fprintf(fp,"force interlace = %d\n",iobj->force_interlace);
-            fprintf(fp,"swap fields = %d\n",iobj->swap_fields);
-            fprintf(fp,"jpeg yuv = %d\n",iobj->jpeg_yuv);
+			fprintf(fp,"force interlace = %d\n",iobj->force_interlace);
+			fprintf(fp,"swap fields = %d\n",iobj->swap_fields);
+			fprintf(fp,"jpeg yuv = %d\n",iobj->jpeg_yuv);
 			fprintf(fp,"async io = %d\n",iobj->async_io);
-            fprintf(fp,"zebra = %d\n",iobj->zebra);
+			fprintf(fp,"zebra = %d\n",iobj->zebra);
 			fprintf(fp,"codec = %s\n",iobj->input_codec.c_str());
+
+			if (iobj->user_ar_n >= 1 && iobj->user_ar_d >= 1)
+				fprintf(fp,"aspect ratio = %d:%d\n",iobj->user_ar_n,iobj->user_ar_d);
 
 			fprintf(fp,"crop = ");
 			if (iobj->crop_bounds)
@@ -2910,7 +2932,7 @@ void InputManager::close_shmem() {
 }
 
 InputManager::InputManager(int input_index) {
-    zebra = 0;
+	zebra = 0;
 	Recording = false;
 	osd_name[0] = 0;
 	file_prefix[0] = 0;
@@ -2918,12 +2940,12 @@ InputManager::InputManager(int input_index) {
 	user_ar_n = user_ar_d = -1;
 	capture_width = 0;
 	capture_height = 0;
-    capture_fps = 0;
-    swap_fields = false;
-    jpeg_yuv = false;
+	capture_fps = 0;
+	swap_fields = false;
+	jpeg_yuv = false;
 	crop_defrect = false;
 	crop_bounds = false;
-    async_io = true;
+	async_io = true;
 	crop_left = crop_top = crop_width = crop_height = CROP_DEFAULT;
 	enable_audio = false;
 	enable_vbi = false;
