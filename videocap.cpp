@@ -109,6 +109,8 @@ enum {
 	VIEW_INPUT_MAX			/* -------------------- */
 };
 
+GtkRadioAction* toolbar_ract[VIEW_INPUT_MAX] = {NULL};
+
 enum {
 	OSD_OFF=0,
 	OSD_SMALL,
@@ -291,6 +293,27 @@ void switch_input(int x);
 bool do_video_source(InputManager *input,bool force_redraw);
 
 InputManager*			Input[VIEW_INPUT_MAX] = {NULL};
+
+void updateInputsToolbar(int i) {
+	if (i >= 0 && i < VIEW_INPUT_MAX) {
+		if (toolbar_ract[i] != NULL && Input[i] != NULL) {
+			GtkAction *act = GTK_ACTION(toolbar_ract[i]);
+			InputManager *im = Input[i];
+
+			if (i >= VIEW_INPUT_1 && i <= VIEW_INPUT_8) {
+				int num = i + 1 - VIEW_INPUT_1;
+				char tmp[64];
+
+				if (im->Recording)
+					sprintf(tmp,"*%d ",num);
+				else
+					sprintf(tmp," %d ",num);
+
+				gtk_action_set_label(act,(const gchar*)tmp);
+			}
+		}
+	}
+}
 
 /* global variables */
 GtkWidget*			x_dialog = NULL;
@@ -1293,6 +1316,8 @@ void InputManager::update_brightcontrast() {
 	socket_command(tmp);
 }
 
+void updateInputsToolbar(int i);
+
 void InputManager::start_recording() {
 	char msg[2048],*n;
 	struct stat st;
@@ -1433,6 +1458,7 @@ void InputManager::start_recording() {
 	if (ack) {
 		fprintf(stderr,"Recording ack, file is '%s'\n",capture_avi.c_str());
 		Recording = true;
+		updateInputsToolbar(index);
 	}
 }
 
@@ -1454,6 +1480,7 @@ void InputManager::stop_recording() {
 	/* TODO: Read back response indicating whether recording started, and what capture file */
 
 	Recording = false;
+	updateInputsToolbar(index);
 }
 
 /* SMPTE colorbars (8-bit Y Cb Cr values) */
@@ -3017,6 +3044,8 @@ InputManager::InputManager(int input_index) {
 	shmem_height = 0;
 	shmem_fd = -1;
 	shmem = NULL;
+
+	updateInputsToolbar(index);
 }
 
 InputManager::~InputManager() {
@@ -6167,7 +6196,7 @@ static int init_main_window()
 	main_window_toolbar_input_action = rad_act;
 
 	/* Input: Input 1 button */
-	rad_act = gtk_radio_action_new ("ViewInput_Input1", " 1 ", "Switch to input #1", NULL, VIEW_INPUT_1);
+	toolbar_ract[VIEW_INPUT_1] = rad_act = gtk_radio_action_new ("ViewInput_Input1", " 1 ", "Switch to input #1", NULL, VIEW_INPUT_1);
 	gtk_radio_action_set_group (rad_act, gslist);
 	gslist = gtk_radio_action_get_group (rad_act);
 	gtk_action_group_add_action (action_group, GTK_ACTION(rad_act));
@@ -6176,7 +6205,7 @@ static int init_main_window()
 			NULL);
 
 	/* Input: Input 2 button */
-	rad_act = gtk_radio_action_new ("ViewInput_Input2", " 2 ", "Switch to input #2", NULL, VIEW_INPUT_2);
+	toolbar_ract[VIEW_INPUT_2] = rad_act = gtk_radio_action_new ("ViewInput_Input2", " 2 ", "Switch to input #2", NULL, VIEW_INPUT_2);
 	gtk_radio_action_set_group (rad_act, gslist);
 	gslist = gtk_radio_action_get_group (rad_act);
 	gtk_action_group_add_action (action_group, GTK_ACTION(rad_act));
@@ -6185,7 +6214,7 @@ static int init_main_window()
 			NULL);
 
 	/* Input: Input 3 button */
-	rad_act = gtk_radio_action_new ("ViewInput_Input3", " 3 ", "Switch to input #3", NULL, VIEW_INPUT_3);
+	toolbar_ract[VIEW_INPUT_3] = rad_act = gtk_radio_action_new ("ViewInput_Input3", " 3 ", "Switch to input #3", NULL, VIEW_INPUT_3);
 	gtk_radio_action_set_group (rad_act, gslist);
 	gslist = gtk_radio_action_get_group (rad_act);
 	gtk_action_group_add_action (action_group, GTK_ACTION(rad_act));
@@ -6194,7 +6223,7 @@ static int init_main_window()
 			NULL);
 
 	/* Input: Input 4 button */
-	rad_act = gtk_radio_action_new ("ViewInput_Input4", " 4 ", "Switch to input #4", NULL, VIEW_INPUT_4);
+	toolbar_ract[VIEW_INPUT_4] = rad_act = gtk_radio_action_new ("ViewInput_Input4", " 4 ", "Switch to input #4", NULL, VIEW_INPUT_4);
 	gtk_radio_action_set_group (rad_act, gslist);
 	gslist = gtk_radio_action_get_group (rad_act);
 	gtk_action_group_add_action (action_group, GTK_ACTION(rad_act));
@@ -6203,7 +6232,7 @@ static int init_main_window()
 			NULL);
 
 	/* Input: Input 5 button */
-	rad_act = gtk_radio_action_new ("ViewInput_Input5", " 5 ", "Switch to input #5", NULL, VIEW_INPUT_5);
+	toolbar_ract[VIEW_INPUT_5] = rad_act = gtk_radio_action_new ("ViewInput_Input5", " 5 ", "Switch to input #5", NULL, VIEW_INPUT_5);
 	gtk_radio_action_set_group (rad_act, gslist);
 	gslist = gtk_radio_action_get_group (rad_act);
 	gtk_action_group_add_action (action_group, GTK_ACTION(rad_act));
@@ -6212,7 +6241,7 @@ static int init_main_window()
 			NULL);
 
 	/* Input: Input 6 button */
-	rad_act = gtk_radio_action_new ("ViewInput_Input6", " 6 ", "Switch to input #6", NULL, VIEW_INPUT_6);
+	toolbar_ract[VIEW_INPUT_6] = rad_act = gtk_radio_action_new ("ViewInput_Input6", " 6 ", "Switch to input #6", NULL, VIEW_INPUT_6);
 	gtk_radio_action_set_group (rad_act, gslist);
 	gslist = gtk_radio_action_get_group (rad_act);
 	gtk_action_group_add_action (action_group, GTK_ACTION(rad_act));
@@ -6221,7 +6250,7 @@ static int init_main_window()
 			NULL);
 
 	/* Input: Input 7 button */
-	rad_act = gtk_radio_action_new ("ViewInput_Input7", " 7 ", "Switch to input #7", NULL, VIEW_INPUT_7);
+	toolbar_ract[VIEW_INPUT_7] = rad_act = gtk_radio_action_new ("ViewInput_Input7", " 7 ", "Switch to input #7", NULL, VIEW_INPUT_7);
 	gtk_radio_action_set_group (rad_act, gslist);
 	gslist = gtk_radio_action_get_group (rad_act);
 	gtk_action_group_add_action (action_group, GTK_ACTION(rad_act));
@@ -6230,7 +6259,7 @@ static int init_main_window()
 			NULL);
 
 	/* Input: Input 8 button */
-	rad_act = gtk_radio_action_new ("ViewInput_Input8", " 8 ", "Switch to input #8", NULL, VIEW_INPUT_8);
+	toolbar_ract[VIEW_INPUT_8] = rad_act = gtk_radio_action_new ("ViewInput_Input8", " 8 ", "Switch to input #8", NULL, VIEW_INPUT_8);
 	gtk_radio_action_set_group (rad_act, gslist);
 	gslist = gtk_radio_action_get_group (rad_act);
 	gtk_action_group_add_action (action_group, GTK_ACTION(rad_act));
