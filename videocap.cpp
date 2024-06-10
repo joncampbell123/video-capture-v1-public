@@ -2090,14 +2090,13 @@ bool put_live_frame_on_screen(InputManager *input,bool force_redraw/*TODO*/) {
 		char tmp[256];
 		char *w = tmp;
 
-		w += sprintf(w,"%u-ch %uHz audio ",
+		w += sprintf(w,"%u-ch %uHz ",
 			(unsigned int)xx->audio_channels,
 			(unsigned int)xx->audio_rate);
 
 		for (unsigned int ch=0;ch < 4 && ch < (unsigned int)xx->audio_channels;ch++) {
-			w += sprintf(w,"ch%u:max=%%%03u avg=%%%03u ",ch+1,
-				(xx->map[input->shmem_out].audio_max_level[ch]*100)/32767,
-				(xx->map[input->shmem_out].audio_avg_level[ch]*100)/32767);
+			w += sprintf(w,"ch%u:%%%03u ",ch+1,
+				(xx->map[input->shmem_out].audio_max_level[ch]*100)/32767);
 		}
 
 		status += tmp;

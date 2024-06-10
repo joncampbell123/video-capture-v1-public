@@ -3060,7 +3060,7 @@ int main(int argc,char **argv) {
 					unsigned int ch=0;
 					for (;ch < audio_channels;ch++) {
 						xx->map[xx->in].audio_max_level[ch] = audio_max_level[ch];
-						xx->map[xx->in].audio_avg_level[ch] = (uint32_t)audio_sum_level[ch] / (audio_sum_count != 0 ? audio_sum_count : 1);
+//						xx->map[xx->in].audio_avg_level[ch] = (uint32_t)audio_sum_level[ch] / (audio_sum_count != 0 ? audio_sum_count : 1);
 //						fprintf(stderr,"ch=%u max=%u avg=%u count=%u\n",
 //							ch,
 //							xx->map[xx->in].audio_max_level[ch],
@@ -3076,7 +3076,7 @@ int main(int argc,char **argv) {
 					audio_sum_count = 0;
 					for (;ch < 4;ch++) {
 						xx->map[xx->in].audio_max_level[ch] = 0;
-						xx->map[xx->in].audio_avg_level[ch] = 0;
+//						xx->map[xx->in].audio_avg_level[ch] = 0;
 					}
 					xx->map[xx->in].offset = (uint32_t)((size_t)av_frame->data[0] - (size_t)live_shm);
 					xx->map[xx->in].generation = xx->this_generation;

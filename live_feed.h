@@ -18,7 +18,7 @@ struct live_shm_header_entry {
 	uint32_t		field_order; /* 0=none 1=top field first 2=bottom field first */
 	uint32_t		generation;
 	uint32_t		audio_max_level[4];
-	uint32_t		audio_avg_level[4];
+	uint32_t		__removed__[4]; /* audio_avg_level */
 };
 
 struct live_shm_header {
