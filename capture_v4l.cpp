@@ -18,6 +18,7 @@
 #include <string.h>
 #include <assert.h>
 #include <dirent.h>
+#include <sys/sysmacros.h>	/* major(), minor() */
 #include <errno.h>
 #include <stdio.h>
 #include <fcntl.h>
@@ -1354,7 +1355,8 @@ static void help() {
 	fprintf(stderr,"Impact Studio Pro Camera Switching system v1.x (C) 2010-2011\n");
 	fprintf(stderr,"    -index <N>                             Which Video4linux capture source to use\n");
 	fprintf(stderr,"    -path <path>                           Where to capture to\n");
-	fprintf(stderr,"    -audio-device <device>                 ALSA device to capture from or 'auto'\n");
+	fprintf(stderr,"    -audio-device <device>                 ALSA device to capture from, 'auto' (ALSA default),\n");
+	fprintf(stderr,"                                           or 'capture-card' (the capture card's own ALSA device)\n");
 	fprintf(stderr,"    -monitor                               Play the captured audio to the monitor device\n");
 	fprintf(stderr,"    -monitor-device <device>               ALSA playback device for -monitor (default 'default')\n");
 	fprintf(stderr,"    -shm <name>                            Live feed shm name\n");
@@ -1931,6 +1933,137 @@ static void monitor_push(const int16_t *samples,size_t frames) {
 	}
 	pthread_cond_signal(&mon_cond);
 	pthread_mutex_unlock(&mon_mutex);
+}
+
+/* ------------------------------------------------------------------------------
+ * "capture-card" audio: find the ALSA card that belongs to the same hardware as the
+ * V4L device we capture from.
+ *
+ * sysfs gives the hardware node of the video device (/sys/dev/char/M:m/device) and
+ * of each sound card (/sys/class/sound/cardN/device). They belong together if they
+ * are the same node (saa7134-alsa), interfaces of the same USB device (GV-USB2,
+ * em28xx, cx231xx), or functions of the same PCI slot (cx88-alsa).
+ * ------------------------------------------------------------------------------ */
+static string sysfs_realpath(const string &path) {
+	char tmp[PATH_MAX];
+	if (realpath(path.c_str(),tmp) == NULL) return string();
+	return string(tmp);
+}
+
+static string sysfs_first_line(const string &path) {
+	char tmp[256];
+	FILE *fp = fopen(path.c_str(),"r");
+	if (fp == NULL) return string();
+	if (fgets(tmp,sizeof(tmp),fp) == NULL) tmp[0] = 0;
+	fclose(fp);
+	char *e = tmp + strlen(tmp);
+	while (e > tmp && (e[-1] == '\n' || e[-1] == '\r' || e[-1] == ' ')) *--e = 0;
+	return string(tmp);
+}
+
+static string path_dir(const string &p) {
+	size_t i = p.rfind('/');
+	return (i == string::npos) ? string() : p.substr(0,i);
+}
+
+static string path_base(const string &p) {
+	size_t i = p.rfind('/');
+	return (i == string::npos) ? p : p.substr(i+1);
+}
+
+/* "0000:03:00.1" -> true, slot "0000:03:00" */
+static bool pci_function_name(const string &b,string &slot) {
+	unsigned int dom,bus,dev,fn;
+	char tail;
+	if (sscanf(b.c_str(),"%x:%x:%x.%x%c",&dom,&bus,&dev,&fn,&tail) != 4) return false;
+	slot = b.substr(0,b.rfind('.'));
+	return true;
+}
+
+/* "1-1:1.0" (bus-port[.port...]:config.interface) */
+static bool usb_interface_name(const string &b) {
+	unsigned int cfg,ifn;
+	size_t c = b.find(':');
+	if (c == string::npos || c == 0 || b.find('-') == string::npos || b.find('-') > c) return false;
+	return sscanf(b.c_str() + c + 1,"%u.%u",&cfg,&ifn) == 2;
+}
+
+/* returns an ALSA device name such as "plughw:CARD=GVUSB2,DEV=0", or "" if none */
+static string alsa_device_for_v4l(const char *devname) {
+	struct stat st;
+	char tmp[256];
+
+	if (devname == NULL || stat(devname,&st) != 0 || !S_ISCHR(st.st_mode)) return string();
+
+	snprintf(tmp,sizeof(tmp),"/sys/dev/char/%u:%u/device",(unsigned int)major(st.st_rdev),(unsigned int)minor(st.st_rdev));
+	const string vdev = sysfs_realpath(tmp);
+	if (vdev.empty()) return string();
+
+	const string vbase = path_base(vdev),vdir = path_dir(vdev);
+	string vslot;
+	const bool v_pci = pci_function_name(vbase,vslot);
+	const bool v_usb = usb_interface_name(vbase);
+
+	int best_card = -1,best_score = 0;
+	string best_id;
+
+	DIR *d = opendir("/sys/class/sound");
+	if (d == NULL) return string();
+	struct dirent *de;
+	while ((de = readdir(d)) != NULL) {
+		int card;
+		char tail;
+		if (sscanf(de->d_name,"card%d%c",&card,&tail) != 1) continue;
+
+		const string cpath = string("/sys/class/sound/") + de->d_name;
+		const string cdev = sysfs_realpath(cpath + "/device");
+		if (cdev.empty()) continue;
+
+		const string cbase = path_base(cdev),cdir = path_dir(cdev);
+		string cslot;
+		int score = 0;
+
+		if (cdev == vdev)
+			score = 3;	/* same device node */
+		else if (v_usb && usb_interface_name(cbase) && cdir == vdir)
+			score = 2;	/* another interface of the same USB device */
+		else if (v_pci && pci_function_name(cbase,cslot) && cslot == vslot && cdir == vdir)
+			score = 2;	/* another function of the same PCI slot */
+
+		if (score > best_score) {
+			best_score = score;
+			best_card = card;
+			best_id = sysfs_first_line(cpath + "/id");
+		}
+	}
+	closedir(d);
+
+	if (best_card < 0) return string();
+
+	/* the card's first capture PCM device */
+	int best_pcm = -1;
+	if ((d = opendir("/sys/class/sound")) != NULL) {
+		while ((de = readdir(d)) != NULL) {
+			int c,dev;
+			char dir,tail;
+			if (sscanf(de->d_name,"pcmC%dD%d%c%c",&c,&dev,&dir,&tail) != 3) continue;
+			if (c != best_card || dir != 'c') continue;
+			if (best_pcm < 0 || dev < best_pcm) best_pcm = dev;
+		}
+		closedir(d);
+	}
+	if (best_pcm < 0) {
+		fprintf(stderr,"Audio: card %d (%s) belongs to %s but has no capture device\n",best_card,best_id.c_str(),devname);
+		return string();
+	}
+
+	/* plughw: converts rate/format/channels if the card cannot do 48kHz S16 stereo itself */
+	if (!best_id.empty())
+		snprintf(tmp,sizeof(tmp),"plughw:CARD=%s,DEV=%d",best_id.c_str(),best_pcm);
+	else
+		snprintf(tmp,sizeof(tmp),"plughw:%d,%d",best_card,best_pcm);
+
+	return string(tmp);
 }
 
 void close_v4l() {
@@ -2707,8 +2840,22 @@ int open_v4l() {
 		const char *name;
 		int err;
 
+		string card_dev;
+
 		if (audio_device == "auto")
 			name = "default";
+		else if (audio_device == "capture-card") {
+			/* the capture card's own ALSA device, found through sysfs */
+			card_dev = alsa_device_for_v4l(v4l_devname);
+			if (!card_dev.empty()) {
+				fprintf(stderr,"Audio: using the capture card's ALSA device '%s' for %s\n",card_dev.c_str(),v4l_devname);
+				name = card_dev.c_str();
+			}
+			else {
+				fprintf(stderr,"Audio: no ALSA device found for %s, using 'default'\n",v4l_devname);
+				name = "default";
+			}
+		}
 		else
 			name = audio_device.c_str();
 

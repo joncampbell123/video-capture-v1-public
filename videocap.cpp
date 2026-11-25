@@ -3965,6 +3965,12 @@ static gint alsa_dropdown_populate_and_select(GtkWidget *listbox,GtkListStore *l
 	if (active < 0 && CurrentInputObj()->audio_device == "") active = 0;
 	count++;
 
+	/* the backend looks up the ALSA device of the capture card behind the /dev/video device */
+	gtk_list_store_append(list, &iter);
+	gtk_list_store_set(list, &iter, /*column*/0, "capture-card", /*column*/1, "Capture card's own audio (auto-detect)", -1);
+	if (active < 0 && CurrentInputObj()->audio_device == "capture-card") active = count;
+	count++;
+
 	if (snd_device_name_hint(-1,"pcm",&hints) == 0) {
 		n = hints;
 		while (*n != NULL) {
