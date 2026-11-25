@@ -423,6 +423,19 @@ void osd_set_text_big(const char *msg) {
 int				client_area_video_x = 0,client_area_video_y = 0;
 int				client_area_video_w = 1,client_area_video_h = 1;
 
+/* VBI strip at the top of the client area (View -> VBI Lines). The video is laid out below it. */
+int				client_area_vbi_h = 0;			/* strip height in pixels, 0 = not shown */
+int				client_area_vbi_px = 1;			/* pixel rows per VBI line */
+unsigned int			vbi_view_width = 0;			/* samples per line, 0 = no VBI to show */
+unsigned int			vbi_view_count[2] = {0,0};		/* lines per field */
+unsigned int			vbi_view_start[2] = {0,0};		/* first line number of each field */
+uint32_t			vbi_view_seq = 1;			/* vbi_seq of the lines we have (odd = none) */
+double				vbi_view_time = 0;			/* when the lines last changed */
+std::vector<unsigned char>	vbi_view_buf;				/* the lines, field 1 then field 2 */
+XImage*				vbi_view_image = NULL;			/* strip bitmap, window visual */
+uint32_t			vbi_view_lut[256];			/* grey level -> pixel value */
+std::vector<unsigned int>	vbi_view_xmap;				/* strip column -> sample */
+
 GdkPixbuf*			application_icon_gdk_pixbuf = NULL;
 GtkWidget*			messagelabel = NULL;
 GtkWidget*			statusbar = NULL;
@@ -478,6 +491,7 @@ GtkWidget*			main_window_toolbar_input_8 = NULL;
 
 GtkWidget*			main_window_view_osd = NULL;
 GtkWidget*			main_window_view_listen = NULL;
+GtkWidget*			main_window_view_vbi = NULL;
 
 GSList*				ui_notification_log = NULL;
 
@@ -500,6 +514,9 @@ bool				cfg_show_status = true;
 bool				cfg_audio_monitor = false;
 std::string			cfg_audio_monitor_device = "default";	/* ALSA playback device */
 
+/* VBI Lines: show the raw VBI scanlines of the current input in a strip at the top of the client area */
+bool				cfg_show_vbi = false;
+
 void draw_osd();
 void client_area_free();
 void client_area_alloc();
@@ -508,6 +525,9 @@ void client_area_redraw_source_frame(bool total=false);
 void client_area_get_aspect_from_current_input();
 void client_area_draw_overlay_borders();
 void client_area_update_rects_again();
+int client_area_vbi_strip_height(int dh);
+void client_area_draw_vbi();
+void vbi_view_set_none();
 
 /* C/C++ implementation of Perl's chomp command */
 void chomp(char *s) {
@@ -563,6 +583,8 @@ void load_config_section_ui(const char *name,const char *value) {
 		cfg_audio_monitor = load_config_parse_boolean(value);
 	else if (!strcmp(name,"listen device"))
 		cfg_audio_monitor_device = (*value != 0) ? value : "default";
+	else if (!strcmp(name,"vbi lines"))
+		cfg_show_vbi = load_config_parse_boolean(value);
 }
 
 int load_config_section_input_sel = -1;
@@ -801,6 +823,7 @@ void save_configuration() {
 	fprintf(fp,"osd = %s\n",save_config_boolean(user_enable_osd));
 	fprintf(fp,"listen = %s\n",save_config_boolean(cfg_audio_monitor));
 	fprintf(fp,"listen device = %s\n",cfg_audio_monitor_device.c_str());
+	fprintf(fp,"vbi lines = %s\n",save_config_boolean(cfg_show_vbi));
 	fprintf(fp,"\n");
 
 	/* [xwindows] */
@@ -1969,6 +1992,200 @@ static unsigned int fieldmap(unsigned int y,unsigned int field,unsigned int fo,u
 	return std::min(y,h - 1u);
 }
 
+/* ------------------------------------------------------------------------------
+ * VBI strip (View -> VBI Lines)
+ *
+ * The capture program puts the latest raw VBI frame in the live feed segment.
+ * The strip shows it at the top of the client area, one row band per VBI line,
+ * stretched to the window width: the first field's lines, a thin separator,
+ * then the second field's lines. Samples are shown as grey levels as captured.
+ * ------------------------------------------------------------------------------ */
+
+/* height of the strip for a client area dh pixels high, 0 = not shown */
+int client_area_vbi_strip_height(int dh) {
+	const unsigned int lines = vbi_view_count[0] + vbi_view_count[1];
+	int px;
+
+	if (!cfg_show_vbi || vbi_view_width == 0 || lines == 0 || dh < 64)
+		return 0;
+
+	/* up to 3 pixel rows per line, taking no more than about a quarter of the area */
+	px = (dh / 4) / (int)lines;
+	if (px > 3) px = 3;
+	if (px < 1) px = 1;
+	client_area_vbi_px = px;
+
+	const int sep = (vbi_view_count[0] != 0 && vbi_view_count[1] != 0) ? 2 : 0;
+	const int h = ((int)lines * px) + sep;
+	return (h < dh / 2) ? h : 0;
+}
+
+static void vbi_view_relayout() {
+	const int old_h = client_area_vbi_h;
+
+	client_area_update_rects_again();
+	if (client_area_vbi_h != old_h) {
+		/* The software renderer only writes inside the video rectangle, so clear its
+		 * bitmap: otherwise the old picture stays in the new pillars. */
+		if (!client_area_xvideo && client_area_image != NULL && client_area_image->data != NULL)
+			memset(client_area_image->data,0,(size_t)client_area_image->bytes_per_line * (size_t)client_area_image->height);
+
+		client_area_draw_overlay_borders(); /* the next video frame goes to the new place */
+	}
+}
+
+/* forget the VBI lines (input switch, toggled off). keep_seq: hide stale lines but
+ * show them again only when new ones are published */
+static void vbi_view_hide(bool keep_seq) {
+	if (!keep_seq) vbi_view_seq = 1;
+	if (vbi_view_width != 0 || vbi_view_count[0] != 0 || vbi_view_count[1] != 0) {
+		vbi_view_width = 0;
+		vbi_view_count[0] = vbi_view_count[1] = 0;
+		vbi_view_relayout();
+	}
+}
+
+void vbi_view_set_none() {
+	vbi_view_hide(false);
+}
+
+static uint32_t vbi_view_mask_scale(unsigned int g,unsigned long mask) {
+	unsigned int shift = 0;
+
+	if (mask == 0) return 0;
+	while (!(mask & 1ul)) { mask >>= 1; shift++; }
+	return (uint32_t)(((g * mask) / 255u) << shift);
+}
+
+/* (re)create the strip bitmap for the current client width and strip height */
+static bool vbi_view_image_check() {
+	const int w = client_area_width,h = client_area_vbi_h;
+
+	if (vbi_view_image != NULL && (vbi_view_image->width != w || vbi_view_image->height != h)) {
+		XDestroyImage(vbi_view_image); /* frees the data too */
+		vbi_view_image = NULL;
+	}
+	if (vbi_view_image != NULL) return true;
+	if (w <= 0 || h <= 0 || client_area_display == NULL) return false;
+
+	XWindowAttributes wa;
+	if (!XGetWindowAttributes(client_area_display,client_area_xid,&wa) || wa.visual == NULL)
+		return false;
+
+	vbi_view_image = XCreateImage(client_area_display,wa.visual,wa.depth,ZPixmap,0,NULL,w,h,32,0);
+	if (vbi_view_image == NULL) return false;
+	vbi_view_image->data = (char*)malloc((size_t)vbi_view_image->bytes_per_line * (size_t)h);
+	if (vbi_view_image->data == NULL) {
+		XDestroyImage(vbi_view_image);
+		vbi_view_image = NULL;
+		return false;
+	}
+
+	for (unsigned int g=0;g < 256;g++)
+		vbi_view_lut[g] =
+			vbi_view_mask_scale(g,wa.visual->red_mask) |
+			vbi_view_mask_scale(g,wa.visual->green_mask) |
+			vbi_view_mask_scale(g,wa.visual->blue_mask);
+
+	vbi_view_xmap.clear(); /* rebuilt for the new width */
+	return true;
+}
+
+static inline void vbi_view_put_row(XImage *img,int y,const unsigned char *src,uint32_t fixed,bool use_fixed) {
+	unsigned char *row = (unsigned char*)img->data + ((size_t)y * (size_t)img->bytes_per_line);
+	const int w = img->width;
+
+	if (img->bits_per_pixel == 32) {
+		uint32_t *d = (uint32_t*)row;
+		for (int x=0;x < w;x++) d[x] = use_fixed ? fixed : vbi_view_lut[src[vbi_view_xmap[x]]];
+	}
+	else if (img->bits_per_pixel == 16) {
+		uint16_t *d = (uint16_t*)row;
+		for (int x=0;x < w;x++) d[x] = (uint16_t)(use_fixed ? fixed : vbi_view_lut[src[vbi_view_xmap[x]]]);
+	}
+	else {
+		for (int x=0;x < w;x++) XPutPixel(img,x,y,use_fixed ? fixed : vbi_view_lut[src[vbi_view_xmap[x]]]);
+	}
+}
+
+/* draw the strip with the lines we have */
+void client_area_draw_vbi() {
+	if (client_area_vbi_h <= 0 || vbi_view_width == 0 || client_area_width <= 0) return;
+	if (client_area_display == NULL || client_area_gc == 0) return;
+	if (vbi_view_buf.size() < (size_t)vbi_view_width * (vbi_view_count[0] + vbi_view_count[1])) return;
+	if (!vbi_view_image_check()) return;
+
+	XImage *img = vbi_view_image;
+	const int w = img->width;
+
+	if (vbi_view_xmap.size() != (size_t)w || (w > 0 && vbi_view_xmap[w-1] >= vbi_view_width)) {
+		vbi_view_xmap.resize(w);
+		for (int x=0;x < w;x++)
+			vbi_view_xmap[x] = (unsigned int)(((unsigned long long)x * vbi_view_width) / (unsigned long long)w);
+	}
+
+	const uint32_t separator = vbi_view_mask_scale(255,img->red_mask) | vbi_view_mask_scale(64,img->green_mask); /* orange */
+	const int sep = (vbi_view_count[0] != 0 && vbi_view_count[1] != 0) ? 2 : 0;
+	int y = 0;
+
+	for (unsigned int f=0;f < 2;f++) {
+		for (unsigned int l=0;l < vbi_view_count[f];l++) {
+			const unsigned int line = (f ? vbi_view_count[0] : 0) + l;
+			const unsigned char *src = vbi_view_buf.data() + ((size_t)line * vbi_view_width);
+			for (int r=0;r < client_area_vbi_px && y < img->height;r++)
+				vbi_view_put_row(img,y++,src,0,false);
+		}
+		if (f == 0) {
+			for (int r=0;r < sep && y < img->height;r++)
+				vbi_view_put_row(img,y++,NULL,separator,true);
+		}
+	}
+	while (y < img->height)
+		vbi_view_put_row(img,y++,NULL,0,true);
+
+	XPutImage(client_area_display,client_area_xid,client_area_gc,img,0,0,0,0,w,img->height);
+}
+
+/* pick up a new VBI frame from the capture program's live feed, if there is one */
+static void vbi_view_update(InputManager *input,volatile struct live_shm_header *xx) {
+	const uint32_t w = xx->vbi_width,c0 = xx->vbi_count[0],c1 = xx->vbi_count[1];
+	const uint32_t off = xx->vbi_offset;
+
+	if (!cfg_show_vbi || w == 0 || w > 8192 || (c0 + c1) == 0 || (c0 + c1) > 256 ||
+		((size_t)off + ((size_t)w * (c0 + c1))) > input->shmem_size) {
+		vbi_view_set_none();
+		return;
+	}
+
+	const uint32_t seq = xx->vbi_seq;
+	if (seq & 1u) return;			/* being written, next time */
+	if (seq == 0) return;			/* nothing published yet */
+	if (seq == vbi_view_seq) {		/* nothing new */
+		if (vbi_view_width != 0 && (NOW - vbi_view_time) > 1.0)
+			vbi_view_hide(true);	/* no VBI for a second (no signal): hide until new lines */
+		return;
+	}
+
+	const size_t bytes = (size_t)w * (c0 + c1);
+	if (vbi_view_buf.size() < bytes) vbi_view_buf.resize(bytes);
+	__sync_synchronize();
+	memcpy(vbi_view_buf.data(),(const unsigned char*)input->shmem + off,bytes);
+	__sync_synchronize();
+	if (xx->vbi_seq != seq) return;	/* overwritten while copying, next time */
+
+	const bool geometry = (w != vbi_view_width || c0 != vbi_view_count[0] || c1 != vbi_view_count[1]);
+	vbi_view_width = w;
+	vbi_view_count[0] = c0;
+	vbi_view_count[1] = c1;
+	vbi_view_start[0] = xx->vbi_start[0];
+	vbi_view_start[1] = xx->vbi_start[1];
+	vbi_view_seq = seq;
+	vbi_view_time = NOW;
+
+	if (geometry) vbi_view_relayout();
+	client_area_draw_vbi();
+}
+
 bool put_live_frame_on_screen(InputManager *input,bool force_redraw/*TODO*/) {
 	unsigned int field_order = ~0u;
 	int field = -1;
@@ -1978,8 +2195,10 @@ bool put_live_frame_on_screen(InputManager *input,bool force_redraw/*TODO*/) {
 	volatile struct live_shm_header *xx =
 		(volatile struct live_shm_header*)(input->shmem);
 
-	if (input->shmem == NULL || input->shmem_width < 1 || input->shmem_height < 1 || input->shmem_slots == 0)
+	if (input->shmem == NULL || input->shmem_width < 1 || input->shmem_height < 1 || input->shmem_slots == 0) {
+		vbi_view_set_none();
 		return ret;
+	}
 
 	if (xx->header == LIVE_SHM_HEADER_UPDATING || xx->slots != input->shmem_slots ||
 		xx->width != input->shmem_width || xx->height != input->shmem_height) {
@@ -1990,8 +2209,12 @@ bool put_live_frame_on_screen(InputManager *input,bool force_redraw/*TODO*/) {
 		input->shmem_width = 0;
 		input->shmem_height = 0;
 		input->shmem_slots = 0;
+		vbi_view_set_none();
 		return ret;
 	}
+
+	/* VBI strip: the lines arrive once per frame, independent of the video slots */
+	vbi_view_update(input,xx);
 
 	slot = xx->in;
 	if (slot < 0 || slot >= input->shmem_slots)
@@ -2117,6 +2340,13 @@ bool put_live_frame_on_screen(InputManager *input,bool force_redraw/*TODO*/) {
 		for (unsigned int ch=0;ch < 4 && ch < (unsigned int)xx->audio_channels;ch++) {
 			w += sprintf(w,"ch%u:%%%03u ",ch+1,
 				(xx->map[input->shmem_out].audio_max_level[ch]*100)/32767);
+		}
+
+		if (client_area_vbi_h > 0 && vbi_view_width != 0) {
+			w += sprintf(w,"VBI %u-%u",vbi_view_start[0],vbi_view_start[0]+vbi_view_count[0]-1);
+			if (vbi_view_count[1] != 0)
+				w += sprintf(w,"/%u-%u",vbi_view_start[1],vbi_view_start[1]+vbi_view_count[1]-1);
+			w += sprintf(w," (%u samples) ",vbi_view_width);
 		}
 
 		status += tmp;
@@ -2532,6 +2762,11 @@ void switch_input(int x) {
 		CurrentInputObj()->onActivate(0);
 		CurrentInput = x;
 		CurrentInputObj()->onActivate(1);
+
+		if (pthread_mutex_lock(&global_mutex) == 0) {
+			vbi_view_set_none(); /* the new input's lines come with its live feed */
+			pthread_mutex_unlock(&global_mutex);
+		}
 
 		/* and the audio dialog might want to update from the new input */
 		update_backend_dialog_from_vars();
@@ -3187,6 +3422,32 @@ static void on_main_window_view_listen(GtkMenuItem *menuitem,const char *ui_mgr_
 				osd_set_text_big("Listen: audio capture is\nnot enabled for this input");
 			else
 				osd_set_text_big("Listen: on");
+		}
+	}
+}
+
+/* ----------------------- VIEW -> VBI LINES ----------------------- */
+static void on_main_window_view_vbi(GtkMenuItem *menuitem,const char *ui_mgr_path) {
+	bool sel = (bool)gtk_check_menu_item_get_active (GTK_CHECK_MENU_ITEM(main_window_view_vbi));
+	if (sel != cfg_show_vbi) {
+		cfg_show_vbi = sel;
+		fprintf(stderr,"VBI lines turned %s\n",cfg_show_vbi?"on":"off");
+
+		if (pthread_mutex_lock(&global_mutex) == 0) {
+			vbi_view_set_none(); /* off: remove the strip. on: fetched with the next frame */
+			vbi_view_relayout();
+			if (video_should_redraw_t < 0)
+				video_should_redraw_t = NOW + 0.1;
+			pthread_mutex_unlock(&global_mutex);
+		}
+
+		if (CurrentInput > VIEW_INPUT_OFF && Input[CurrentInput] != NULL) {
+			if (!cfg_show_vbi)
+				osd_set_text_big("VBI lines: off");
+			else if (!CurrentInputObj()->enable_vbi)
+				osd_set_text_big("VBI lines: VBI capture is\nnot enabled for this input");
+			else
+				osd_set_text_big("VBI lines: on");
 		}
 	}
 }
@@ -5194,6 +5455,11 @@ void client_area_free() {
 void client_area_update_rects(int sw,int sh,int dw,int dh,int ar_n,int ar_d) {
 	int if_dw,if_dh;
 
+	/* the VBI strip takes the top of the client area, the video fits below it */
+	client_area_vbi_h = client_area_vbi_strip_height(dh);
+	dh -= client_area_vbi_h;
+	if (dh < 1) dh = 1;
+
 	if (ar_n > 0 && ar_d > 0) {
 		{
 			double f_dw,f_dh;
@@ -5222,6 +5488,8 @@ void client_area_update_rects(int sw,int sh,int dw,int dh,int ar_n,int ar_d) {
 		client_area_video_y = 0;
 		client_area_video_h = dh;
 	}
+
+	client_area_video_y += client_area_vbi_h;
 }
 
 void client_area_redraw_source_frame(bool total) {
@@ -5253,15 +5521,20 @@ void client_area_redraw_source_frame(bool total) {
 		}
 	}
 	else {
-		if (client_area_width > 0 && client_area_height > 0 && client_area_display && client_area_gc && client_area_image) {
+		if (client_area_width > 0 && client_area_height > client_area_vbi_h && client_area_display && client_area_gc && client_area_image) {
+			/* everything below the VBI strip */
+			const int top = client_area_vbi_h;
+
 			if (client_area_shm)
 				XShmPutImage(client_area_display,client_area_xid,client_area_gc,client_area_image,
-					0,0,0,0,client_area_width,client_area_height,0);
+					0,top,0,top,client_area_width,client_area_height-top,0);
 			else
 				XPutImage(client_area_display,client_area_xid,client_area_gc,client_area_image,
-					0,0,0,0,client_area_width,client_area_height);
+					0,top,0,top,client_area_width,client_area_height-top);
 		}
 	}
+
+	if (total) client_area_draw_vbi();
 }
 
 void client_area_update_rects_again() {
@@ -5590,9 +5863,9 @@ void client_area_draw_overlay_borders() {
 	XSetForeground(client_area_display,client_area_gc,0);
 	XSetFillStyle(client_area_display,client_area_gc,FillSolid);
 
-	/* Top bar */
-	if (client_area_video_y > 0)
-		XFillRectangle(client_area_display,client_area_xid,client_area_gc,0,0,client_area_width,client_area_video_y);
+	/* Top bar (below the VBI strip, which draws itself) */
+	if (client_area_video_y > client_area_vbi_h)
+		XFillRectangle(client_area_display,client_area_xid,client_area_gc,0,client_area_vbi_h,client_area_width,client_area_video_y-client_area_vbi_h);
 	/* Bottom bar */
 	if ((client_area_video_y+client_area_video_h) < client_area_height)
 		XFillRectangle(client_area_display,client_area_xid,client_area_gc,0,client_area_video_y+client_area_video_h,
@@ -5630,6 +5903,7 @@ static void on_main_window_video_expose(GtkWidget *widget,GdkEvent *event,gpoint
 
 			if (client_area_xvideo_port > 0) {
 				client_area_draw_overlay_borders();
+				client_area_draw_vbi();
 				if (client_area_shm) {
 					/* draw the overlay. X might draw the chroma key color in the destination rectangle
 					 * as part of it. For areas outside the overlay, we need to draw over them ourself */
@@ -5922,6 +6196,7 @@ static const gchar *ui_info =
 "      </menu>"
 "      <menuitem action='ViewMenuOSD'/>"
 "      <menuitem action='ViewMenuListen'/>"
+"      <menuitem action='ViewMenuVBI'/>"
 "    </menu>"
 "    <menu action='ConfigMenu'>"
 "      <menuitem action='ConfigMenu_X'/>"
@@ -6339,6 +6614,13 @@ static int init_main_window()
 			G_CALLBACK(on_main_window_view_listen),
 			NULL);
 
+	/* VBI Lines switch (Shift+V) */
+	tog_act = gtk_toggle_action_new ("ViewMenuVBI", "_VBI Lines", "Show the raw VBI scanlines at the top of the window", NULL);
+	gtk_action_group_add_action_with_accel (action_group, GTK_ACTION(tog_act), "<Shift>V");
+	g_signal_connect(tog_act, "toggled",
+			G_CALLBACK(on_main_window_view_vbi),
+			NULL);
+
 	main_window_ui_mgr = gtk_ui_manager_new();
 	g_object_set_data_full(G_OBJECT(main_window), "ui-manager", main_window_ui_mgr,
 			g_object_unref);
@@ -6575,6 +6857,10 @@ static int init_main_window()
 	tmp = gtk_ui_manager_get_widget (main_window_ui_mgr, "/MenuBar/ViewMenu/ViewMenuListen");
 	main_window_view_listen = tmp;
 	gtk_check_menu_item_set_active_notoggle (GTK_CHECK_MENU_ITEM(tmp), cfg_audio_monitor);
+
+	tmp = gtk_ui_manager_get_widget (main_window_ui_mgr, "/MenuBar/ViewMenu/ViewMenuVBI");
+	main_window_view_vbi = tmp;
+	gtk_check_menu_item_set_active_notoggle (GTK_CHECK_MENU_ITEM(tmp), cfg_show_vbi);
 
 #ifdef GTK_HAS_INFO_BAR
 	if (gtk_widget_get_visible(main_window)) /* FIXME: When did this appear in the GTK+? */

@@ -359,6 +359,24 @@ static volatile struct live_shm_header *live_shm_head() {
 	return (volatile struct live_shm_header*)live_shm;
 }
 
+/* copy the latest complete VBI frame (both fields) to the live feed for display */
+static void vbi_publish_live() {
+	if (live_shm == NULL || vbi_buffer == NULL) return;
+
+	volatile struct live_shm_header *xx = live_shm_head();
+	if (xx->header != LIVE_SHM_HEADER || xx->vbi_width == 0 || xx->vbi_width != (uint32_t)vbi_width) return;
+
+	const size_t lines = (size_t)xx->vbi_count[0] + (size_t)xx->vbi_count[1];
+	if (lines > (size_t)vbi_height) return;
+	if ((size_t)xx->vbi_offset + (lines * (size_t)vbi_width) > live_shm_size) return;
+
+	xx->vbi_seq = xx->vbi_seq + 1; /* odd: writing */
+	__sync_synchronize();
+	memcpy(live_shm + xx->vbi_offset,vbi_buffer,lines * (size_t)vbi_width);
+	__sync_synchronize();
+	xx->vbi_seq = xx->vbi_seq + 1; /* even: complete */
+}
+
 static int how_many_cpus() {
 	int number_of_cpus = sysconf(_SC_NPROCESSORS_ONLN);
 	if (number_of_cpus < 1) number_of_cpus = 1;
@@ -2779,7 +2797,31 @@ int open_v4l() {
 		xx->audio_rate = audio_rate;
 		xx->frame_size = (v4l_width_stride * v4l_height) + ((v4l_width_stride>>1) * (v4l_height>>v4l_codec_yshr) * 2);
 		xx->in = 0;
-		xx->slots = (live_shm_size - sizeof(*xx)) / xx->frame_size;
+
+		/* raw VBI for display goes at the end of the segment, after the frame slots */
+		{
+			size_t frames_end = live_shm_size;
+
+			xx->vbi_width = 0;
+			xx->vbi_count[0] = xx->vbi_count[1] = 0;
+			xx->vbi_start[0] = xx->vbi_start[1] = 0;
+			xx->vbi_offset = 0;
+			xx->vbi_seq = 0;
+			if (vbi_fd >= 0 && vbi_buffer != NULL && vbi_width > 0 && vbi_height > 0) {
+				const size_t vbytes = (size_t)vbi_width * (size_t)vbi_height;
+
+				if (live_shm_size > vbytes + sizeof(*xx) + (2 * (size_t)xx->frame_size)) {
+					frames_end = (live_shm_size - vbytes) & (~((size_t)63));
+					xx->vbi_offset = (uint32_t)frames_end;
+					xx->vbi_count[0] = v4l_vbi_capfmt.fmt.vbi.count[0];
+					xx->vbi_count[1] = v4l_vbi_capfmt.fmt.vbi.count[1];
+					xx->vbi_start[0] = v4l_vbi_capfmt.fmt.vbi.start[0];
+					xx->vbi_start[1] = v4l_vbi_capfmt.fmt.vbi.start[1];
+					xx->vbi_width = vbi_width;
+				}
+			}
+			xx->slots = (frames_end - sizeof(*xx)) / xx->frame_size;
+		}
 
 		if (v4l_codec_yshr == 0)
 			xx->color_fmt = LIVE_COLOR_FMT_YUV422;	
@@ -3695,6 +3737,9 @@ int main(int argc,char **argv) {
 					}
 
 					vbi_read_field ^= 1;
+					if (!vbi_read_field)
+						vbi_publish_live(); /* both fields in: show them in the GUI */
+
 					if (!vbi_read_field && AVI && fmp4_vbi_context != NULL) {
 						/* direct conversion to the shared memory segment, convert only once */
 						av_frame->data[0] = vbi_buffer;

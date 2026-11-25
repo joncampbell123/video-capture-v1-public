@@ -33,6 +33,9 @@ As of 2011/11/30 some keyboard shortcuts have been implemented to assist in usin
    Ctrl+O ................................ Select capture file for File input
    Shift+L ............................... Listen to Audio: play the current input's captured
                                            audio to the sound card (View menu)
+   Shift+V ............................... VBI Lines: show the raw VBI scanlines of the current
+                                           input at the top of the window (View menu; needs
+                                           VBI capture enabled for the input)
 
 What is currently implemented:
  - video capture, live feed display, and recording to an AVI file when recording activated
