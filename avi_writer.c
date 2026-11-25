@@ -101,6 +101,23 @@ int avi_writer_stream_set_format(avi_writer_stream *s,void *data,size_t len) {
 	return 1;
 }
 
+int avi_writer_stream_set_vprp(avi_writer_stream *s,const void *data,size_t len) {
+	if (s == NULL) return 0;
+	if (s->vprp) free(s->vprp);
+	s->vprp_len = 0;
+	s->vprp = NULL;
+
+	if (len == 0 || data == NULL)
+		return 1;
+
+	if ((s->vprp = malloc(len)) == NULL)
+		return 0;
+
+	s->vprp_len = len;
+	memcpy(s->vprp,data,len);
+	return 1;
+}
+
 riff_strh_AVISTREAMHEADER *avi_writer_stream_header(avi_writer_stream *s) {
 	if (s == NULL) return NULL;
 	return &s->header;
@@ -155,6 +172,9 @@ void avi_writer_free_stream(avi_writer_stream *s) {
 	if (s->format) free(s->format);
 	s->format_len = 0;
 	s->format = NULL;
+	if (s->vprp) free(s->vprp);
+	s->vprp_len = 0;
+	s->vprp = NULL;
 }
 
 void avi_writer_free_streams(avi_writer *w) {
@@ -368,6 +388,15 @@ int avi_writer_begin_header(avi_writer *w) {
 			memset(tmp,0,sizeof(tmp));
 			for (i=0;i < (16384/512);i++) assert(riff_stack_write(w->riff,riff_stack_top(w->riff),tmp,512) == 512);
 			s->indx_junk = *riff_stack_top(w->riff);
+			riff_stack_pop(w->riff);
+		}
+
+		/* [4] vprp (OpenDML video properties: field count and order) */
+		if (s->vprp && s->vprp_len > 0) {
+			assert(riff_stack_begin_new_chunk_here(w->riff,&chunk));
+			assert(riff_stack_set_chunk_data_type(&chunk,riff_fourcc_const('v','p','r','p')));
+			assert(riff_stack_push(w->riff,&chunk)); /* NTS: we can reuse chunk, the stack copies it here */
+			assert((int)riff_stack_write(w->riff,riff_stack_top(w->riff),s->vprp,(int)s->vprp_len) == (int)s->vprp_len);
 			riff_stack_pop(w->riff);
 		}
 

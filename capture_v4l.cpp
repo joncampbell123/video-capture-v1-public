@@ -252,6 +252,8 @@ static int			v4l_framerate_n = 30000,v4l_framerate_d = 1001;
 static int			v4l_force_interlaced = -2;
 static int			v4l_interlaced = 0;
 static int			v4l_interlaced_woven = 0;
+static bool			v4l_std_625 = false; /* current standard is 625/50 (V4L2_FIELD_INTERLACED = top field first) */
+static bool			v4l_std_known = false; /* VIDIOC_G_STD worked (analog TV input) */
 static int			v4l_framesize = 0;
 static int			v4l_stride = 720;
 static int			v4l_width_stride = 720;
@@ -279,8 +281,43 @@ static int effective_v4l_interlaced(void) {
         return swap_fields ? field_opposite(v4l_interlaced) : v4l_interlaced;
 }
 
-static struct v4l2_capability	v4l_caps;
 static struct v4l2_format	v4l_fmt;
+
+/* Formats whose buffers hold a whole interlaced frame (both fields) */
+static bool v4l2_field_is_frame(const unsigned int f) {
+	return	f == V4L2_FIELD_INTERLACED || f == V4L2_FIELD_INTERLACED_TB || f == V4L2_FIELD_INTERLACED_BT ||
+		f == V4L2_FIELD_SEQ_TB || f == V4L2_FIELD_SEQ_BT;
+}
+
+/* Set v4l_interlaced (0 = top field first, 1 = bottom field first, -1 = progressive)
+ * and v4l_interlaced_woven (1 = fields interleaved line by line, 0 = one field after
+ * the other) from a V4L2 field value (format or dequeued buffer). */
+static void v4l_set_field_order(const unsigned int field) {
+	if ((field == V4L2_FIELD_TOP || field == V4L2_FIELD_BOTTOM) && v4l2_field_is_frame(v4l_fmt.fmt.pix.field)) {
+		/* A lone field in a frame format, marked by the driver (e.g. gvusb2 "Deliver Incomplete
+		 * Frames"): the buffer is still a woven frame with the missing field's lines black.
+		 * Keep the stream's field order instead of switching to progressive. */
+		if (v4l_interlaced < 0) v4l_interlaced = v4l_std_625 ? 0 : 1;
+		v4l_interlaced_woven = (v4l_fmt.fmt.pix.field == V4L2_FIELD_SEQ_TB || v4l_fmt.fmt.pix.field == V4L2_FIELD_SEQ_BT) ? 0 : 1;
+		return;
+	}
+
+	v4l_interlaced = -1;
+	v4l_interlaced_woven = 1;
+	if (field == V4L2_FIELD_INTERLACED)
+		v4l_interlaced = v4l_std_625 ? 0 : 1; /* temporal order depends on the standard */
+	else if (field == V4L2_FIELD_INTERLACED_BT)
+		v4l_interlaced = 1;
+	else if (field == V4L2_FIELD_INTERLACED_TB)
+		v4l_interlaced = 0;
+	else if (field == V4L2_FIELD_SEQ_TB)
+		{ v4l_interlaced = 0; v4l_interlaced_woven = 0; }
+	else if (field == V4L2_FIELD_SEQ_BT)
+		{ v4l_interlaced = 1; v4l_interlaced_woven = 0; }
+	/* NONE, TOP, BOTTOM, ALTERNATE (single-field images): progressive */
+}
+
+static struct v4l2_capability	v4l_caps;
 
 static int			audio_rate = 0;
 static int			audio_channels = 0;
@@ -501,6 +538,82 @@ static void close_avi_file() {
 	}
 }
 
+static unsigned int gcd_u(unsigned int a,unsigned int b) {
+	while (b != 0) { unsigned int t = a % b; a = b; b = t; }
+	return a;
+}
+
+/* OpenDML 1.02 video properties header (LIST:strl/vprp) for the video stream.
+ * This is how an AVI file states that frames are interlaced and which field comes
+ * first, for any codec, including codecs that cannot signal it themselves
+ * (HuffYUV has only an "interlaced" bit, Ut Video nothing).
+ *
+ * FieldInfo[] lists the fields in temporal order. VideoYValidStartLine is 0 for the
+ * top field and 1 for the bottom field, the same convention FFmpeg's AVI muxer uses,
+ * so a top-field-first file has start lines 0,1 and a bottom-field-first file 1,0. */
+static bool write_video_vprp(avi_writer_stream *s) {
+	unsigned char tmp[sizeof(riff_vprp_VideoPropHeader) + (2 * sizeof(riff_vprp_VIDEO_FIELD_DESC))];
+	riff_vprp_VideoPropHeader *h = (riff_vprp_VideoPropHeader*)tmp;
+	riff_vprp_VIDEO_FIELD_DESC *fd = (riff_vprp_VIDEO_FIELD_DESC*)(tmp + sizeof(*h));
+	const int order = effective_v4l_interlaced();
+	const unsigned int fields = (order >= 0) ? 2 : 1;
+	const unsigned int w = (unsigned int)v4l_width,ht = (unsigned int)v4l_height;
+	unsigned int i;
+
+	memset(tmp,0,sizeof(tmp));
+
+	/* VideoFormatToken: 0=unknown 1=PAL square 2=PAL CCIR 601 3=NTSC square 4=NTSC CCIR 601
+	 * VideoStandard: 0=unknown 1=PAL 2=NTSC 3=SECAM */
+	if (v4l_std_known) {
+		h->VideoStandard = v4l_std_625 ? 1 : 2;
+		if (w == 720 && ht == (v4l_std_625 ? 576u : 480u))
+			h->VideoFormatToken = v4l_std_625 ? 2 : 4;
+		else if (w == (v4l_std_625 ? 768u : 640u) && ht == (v4l_std_625 ? 576u : 480u))
+			h->VideoFormatToken = v4l_std_625 ? 1 : 3;
+
+		h->dwVTotalInLines = v4l_std_625 ? 625 : 525;
+		if (h->VideoFormatToken == 2 || h->VideoFormatToken == 4)
+			h->dwHTotalInT = v4l_std_625 ? 864 : 858; /* 13.5 MHz samples per line */
+		else
+			h->dwHTotalInT = w;
+		h->dwFrameAspectRatio = (4u << 16) | 3u; /* analog TV picture: 4:3 (x in the high word) */
+	}
+	else {
+		unsigned int g = gcd_u(w,ht);
+		h->dwHTotalInT = w;
+		h->dwVTotalInLines = ht;
+		if (g != 0) h->dwFrameAspectRatio = ((w / g) << 16) | (ht / g);
+	}
+
+	/* vertical refresh in Hz: the field rate for interlaced video */
+	if (v4l_framerate_d > 0)
+		h->dwVerticalRefreshRate = (uint32_t)(((uint64_t)v4l_framerate_n * fields + (v4l_framerate_d / 2)) / v4l_framerate_d);
+
+	h->dwFrameWidthInPixels = w;
+	h->dwFrameHeightInLines = ht;
+	h->nbFieldPerFrame = fields;
+
+	for (i=0;i < fields;i++) {
+		fd[i].CompressedBMHeight = ht / fields;
+		fd[i].CompressedBMWidth = w;
+		fd[i].ValidBMHeight = ht / fields;
+		fd[i].ValidBMWidth = w;
+		fd[i].ValidBMXOffset = 0;
+		fd[i].ValidBMYOffset = 0;
+		fd[i].VideoXOffsetInT = 0;
+		if (fields == 2)
+			fd[i].VideoYValidStartLine = (order == 0) ? i : (i ^ 1); /* first entry = first field in time */
+		else
+			fd[i].VideoYValidStartLine = 0;
+	}
+
+	fprintf(stderr,"AVI vprp: %u field(s)%s, standard %u, format token %u, %u Hz\n",
+		fields,fields == 2 ? (order == 0 ? " top field first" : " bottom field first") : "",
+		(unsigned int)h->VideoStandard,(unsigned int)h->VideoFormatToken,(unsigned int)h->dwVerticalRefreshRate);
+
+	return avi_writer_stream_set_vprp(s,tmp,sizeof(*h) + (fields * sizeof(*fd))) != 0;
+}
+
 static void open_avi_file() {
     AVCodecID codec_id = AV_CODEC_ID_H264;
 	riff_avih_AVIMAINHEADER *mainhdr;
@@ -677,7 +790,19 @@ static void open_avi_file() {
 	fmp4_context->thread_type |= FF_THREAD_FRAME;
 //	fmp4_context->flags2 |= CODEC_FLAG2_FAST;
 //	fmp4_context->flags |= CODEC_FLAG_LOW_DELAY;
-	if (effective_v4l_interlaced() >= 0) fmp4_context->flags |= AV_CODEC_FLAG_INTERLACED_DCT;
+	if (effective_v4l_interlaced() >= 0) {
+		fmp4_context->flags |= AV_CODEC_FLAG_INTERLACED_DCT;
+		fmp4_context->field_order = (effective_v4l_interlaced() == 0) ? AV_FIELD_TT : AV_FIELD_BB;
+
+		/* HuffYUV: predict each field on its own and set the interlaced flag in the
+		 * extradata (byte 2 = 0x10). The format has no field order; that goes in the
+		 * AVI vprp chunk (see write_video_vprp). */
+		if (codec_id == AV_CODEC_ID_HUFFYUV || codec_id == AV_CODEC_ID_FFVHUFF)
+			fmp4_context->flags |= AV_CODEC_FLAG_INTERLACED_ME;
+	}
+	else {
+		fmp4_context->field_order = AV_FIELD_PROGRESSIVE;
+	}
 
 	fprintf(stderr,"Encoder using %u threads\n",how_many_cpus());
 
@@ -964,6 +1089,12 @@ static void open_avi_file() {
 	strhdr->dwSampleSize =			0;
 	strhdr->rcFrame.right =			v4l_width;
 	strhdr->rcFrame.bottom =		v4l_height;
+
+	if (!write_video_vprp(AVI_video)) {
+		fprintf(stderr,"Unable to set video properties (vprp)\n");
+		close_avi_file();
+		return;
+	}
 
 	if (capture_vbi && vbi_fd >= 0) {
 		if ((AVI_vbi_video = avi_writer_new_stream(AVI)) == NULL) {
@@ -2069,6 +2200,24 @@ int open_v4l() {
 		tmp[4] = 0;
 		fprintf(stderr,"  format='%s'\n",tmp);
 
+		/* V4L2_FIELD_INTERLACED means "temporal order depends on the standard":
+		 * bottom field first for 525/60 (M/NTSC), top field first for 625/50. */
+		{
+			v4l2_std_id cur_std = 0;
+
+			v4l_std_625 = false;
+			v4l_std_known = false;
+			if (ioctl(v4l_fd,VIDIOC_G_STD,&cur_std) == 0 && cur_std != 0) {
+				v4l_std_625 = (cur_std & V4L2_STD_625_50) != 0 && (cur_std & V4L2_STD_525_60) == 0;
+				v4l_std_known = true;
+			}
+			fprintf(stderr,"  standard: %s\n",v4l_std_625 ? "625/50" : "525/60 (or unknown)");
+		}
+
+		/* Field order until the first buffer is dequeued (the AVI header and the
+		 * encoder may be set up before that) */
+		v4l_set_field_order(v4l_fmt.fmt.pix.field);
+
         /* FIXME: FFMPEG doesn't encode mpeg4 4:2:2? */
 		if ((want_codec_sel == "mpeg2-422" || want_codec_sel == "h264-422" || want_codec_sel == "h265-422" || want_codec_sel == "huffyuv-422" || want_codec_sel == "utvideo-422") && (v4l_fmt.fmt.pix.pixelformat == V4L2_PIX_FMT_YUYV || v4l_fmt.fmt.pix.pixelformat == V4L2_PIX_FMT_UYVY)) {
 			v4l_codec_yshr = 0;
@@ -2407,6 +2556,35 @@ void copy_grey_to_planar_y(unsigned char *framep[3],int stride[3],unsigned char 
 	if (framep[2]) memset(framep[2],128,stride[2] * (v4l_height>>v4l_codec_yshr));
 }
 
+/* Where field fc (0 = first in the buffer) comes from and goes to.
+ *
+ * Woven frames (fields interleaved line by line): buffer line y is picture line y,
+ * so field fc starts on buffer line fc and lands on picture line fc. The temporal
+ * order does not move any lines; it is only signalled to the encoder.
+ *
+ * Sequential frames (SEQ_TB/SEQ_BT): the first half of the buffer is the older field,
+ * which is the top field (picture line 0) for top field first, else the bottom field.
+ *
+ * swap_fields exchanges the two picture positions for broken capture drivers. */
+static void field_layout(unsigned int fc,unsigned int srcs,unsigned int hh,unsigned char *sdi,
+	unsigned char **srf,unsigned int *dst_y,unsigned int *src_step) {
+	unsigned int y;
+
+	if (v4l_interlaced_woven) {
+		*srf = sdi + (fc * srcs);
+		*src_step = srcs * 2;
+		y = fc;
+	}
+	else {
+		*srf = sdi + (fc * hh * srcs);
+		*src_step = srcs;
+		y = (v4l_interlaced == 0) ? fc : (fc ^ 1);
+	}
+
+	if (swap_fields) y ^= 1;
+	*dst_y = y;
+}
+
 void copy_yuyv_to_planar_yuv_422(unsigned char *framep[3],int stride[3],unsigned char *sdi) {
 	unsigned int render_height = v4l_height & (~7);
 	unsigned int srcs = v4l_width*2;
@@ -2419,22 +2597,15 @@ void copy_yuyv_to_planar_yuv_422(unsigned char *framep[3],int stride[3],unsigned
 	if (v4l_interlaced >= 0) {
 		/* fc=field count
 		 * field=vertical field position */
-		for (fc=0,field=(v4l_interlaced == 0)?1:0;fc < 2;fc++,field ^= 1) {
+		for (fc=0;fc < 2;fc++) {
 			unsigned char *srf;
+			unsigned int src_step;
 
-			if (v4l_interlaced_woven) {
-				if (swap_fields) /* dumbass capture card drivers */
-					srf = (unsigned char*)sdi + ((fc^1) * srcs);
-				else
-					srf = (unsigned char*)sdi + (fc * srcs);
-			}
-			else {
-				srf = (unsigned char*)sdi + (fc * hh * srcs);
-			}
+			field_layout(fc,srcs,hh,sdi,&srf,&field,&src_step);
 
 			/* 4:2:2 SDI -> 4:2:2 progressive scan */
 			for (y=field;y < render_height;y += 2) {
-				src = srf; srf += srcs*2;
+				src = srf; srf += src_step;
 				Y = framep[0] + ( (y+0)       * stride[0]);
 				U = framep[1] + ( (y+0)       * stride[1]);
 				V = framep[2] + ( (y+0)       * stride[2]);
@@ -2487,22 +2658,15 @@ void copy_uyvy_to_planar_yuv_422(unsigned char *framep[3],int stride[3],unsigned
 	if (v4l_interlaced >= 0) {
 		/* fc=field count
 		 * field=vertical field position */
-		for (fc=0,field=(v4l_interlaced == 0)?1:0;fc < 2;fc++,field ^= 1) {
+		for (fc=0;fc < 2;fc++) {
 			unsigned char *srf;
+			unsigned int src_step;
 
-			if (v4l_interlaced_woven) {
-				if (swap_fields) /* dumbass capture card drivers */
-					srf = (unsigned char*)sdi + ((fc^1) * srcs);
-				else
-					srf = (unsigned char*)sdi + (fc * srcs);
-			}
-			else {
-				srf = (unsigned char*)sdi + (fc * hh * srcs);
-			}
+			field_layout(fc,srcs,hh,sdi,&srf,&field,&src_step);
 
-			/* 4:2:2 SDI -> 4:2:0 progressive scan */
+			/* 4:2:2 SDI -> 4:2:2 progressive scan */
 			for (y=field;y < render_height;y += 2) {
-				src = srf; srf += srcs;
+				src = srf; srf += src_step;
 				Y = framep[0] + ( (y+0)       * stride[0]);
 				U = framep[1] + ( (y+0)       * stride[1]);
 				V = framep[2] + ( (y+0)       * stride[2]);
@@ -2519,8 +2683,8 @@ void copy_uyvy_to_planar_yuv_422(unsigned char *framep[3],int stride[3],unsigned
 		}
 	}
 	else {
-		/* 4:2:2 SDI -> 4:2:0 progressive scan */
-		for (y=0;y < render_height;y += 2) {
+		/* 4:2:2 SDI -> 4:2:2 progressive scan */
+		for (y=0;y < render_height;y++) {
 			Y = framep[0] + ( (y+0)       * stride[0]);
 			U = framep[1] + ( (y+0)       * stride[1]);
 			V = framep[2] + ( (y+0)       * stride[2]);
@@ -2556,15 +2720,15 @@ void copy_yuyv_to_planar_yuv_420(unsigned char *framep[3],int stride[3],unsigned
 	if (v4l_interlaced >= 0) {
 		/* fc=field count
 		 * field=vertical field position */
-		for (fc=0,field=(v4l_interlaced == 0)?1:0;fc < 2;fc++,field ^= 1) {
+		for (fc=0;fc < 2;fc++) {
 			unsigned char *srf;
-			if (v4l_interlaced_woven)
-				srf = (unsigned char*)sdi + (fc * srcs);
-			else
-				srf = (unsigned char*)sdi + (fc * hh * srcs);
+			unsigned int src_step;
+
+			field_layout(fc,srcs,hh,sdi,&srf,&field,&src_step);
+
 			/* 4:2:2 SDI -> 4:2:0 progressive scan */
 			for (y=field;y < render_height;y += 4) {
-				src = srf; srf += srcs*2;
+				src = srf; srf += src_step;
 				Y = framep[0] + ( (y+0)       * stride[0]);
 				U = framep[1] + (((y+1) >> 1) * stride[1]);
 				V = framep[2] + (((y+1) >> 1) * stride[2]);
@@ -2578,7 +2742,7 @@ void copy_yuyv_to_planar_yuv_420(unsigned char *framep[3],int stride[3],unsigned
 					Y += 2;
 				}
 
-				src = srf; srf += srcs*2;
+				src = srf; srf += src_step;
 				Y = framep[0] + ( (y+2)       * stride[0]);
 				for (x=0;x < (unsigned int)v4l_width;x += 2) {
 					/* Y U Y V */
@@ -2632,16 +2796,15 @@ void copy_uyvy_to_planar_yuv_420(unsigned char *framep[3],int stride[3],unsigned
 	if (v4l_interlaced >= 0) {
 		/* fc=field count
 		 * field=vertical field position */
-		for (fc=0,field=(v4l_interlaced == 0)?1:0;fc < 2;fc++,field ^= 1) {
+		for (fc=0;fc < 2;fc++) {
 			unsigned char *srf;
-			if (v4l_interlaced_woven)
-				srf = (unsigned char*)sdi + (fc * srcs);
-			else
-				srf = (unsigned char*)sdi + (fc * hh * srcs);
+			unsigned int src_step;
+
+			field_layout(fc,srcs,hh,sdi,&srf,&field,&src_step);
 
 			/* 4:2:2 SDI -> 4:2:0 progressive scan */
 			for (y=field;y < render_height;y += 4) {
-				src = srf; srf += srcs;
+				src = srf; srf += src_step;
 				Y = framep[0] + ( (y+0)       * stride[0]);
 				U = framep[1] + (((y+1) >> 1) * stride[1]);
 				V = framep[2] + (((y+1) >> 1) * stride[2]);
@@ -2655,7 +2818,7 @@ void copy_uyvy_to_planar_yuv_420(unsigned char *framep[3],int stride[3],unsigned
 					Y += 2;
 				}
 
-				src = srf; srf += srcs;
+				src = srf; srf += src_step;
 				Y = framep[0] + ( (y+2)       * stride[0]);
 				for (x=0;x < (unsigned int)v4l_width;x += 2) {
 					/* U Y V Y */
@@ -2973,20 +3136,7 @@ int main(int argc,char **argv) {
 						if (vb->field == V4L2_FIELD_ANY && v4l_fmt.fmt.pix.field == V4L2_FIELD_INTERLACED)
 							vb->field = V4L2_FIELD_INTERLACED;
 
-						v4l_interlaced = 0;
-						v4l_interlaced_woven = 1;
-						if (vb->field == V4L2_FIELD_NONE)
-							v4l_interlaced = -1;
-						else if (vb->field == V4L2_FIELD_INTERLACED || vb->field == V4L2_FIELD_INTERLACED_BT)
-							v4l_interlaced = 1;
-						else if (vb->field == V4L2_FIELD_INTERLACED_TB)
-							v4l_interlaced = 0;
-						else if (vb->field == V4L2_FIELD_SEQ_TB)
-							{ v4l_interlaced = 1; v4l_interlaced_woven = 0; }
-						else if (vb->field == V4L2_FIELD_SEQ_BT)
-							{ v4l_interlaced = 1; v4l_interlaced_woven = 1; }
-						else
-							v4l_interlaced = -1;
+						v4l_set_field_order(vb->field);
 					}
 					else {
 						fprintf(stderr,"Cannot dq buf %u\n",v4l_bufptr);

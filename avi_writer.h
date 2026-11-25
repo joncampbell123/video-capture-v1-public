@@ -36,6 +36,8 @@ typedef struct avi_writer_stream {
 	unsigned int			indx_entryofs;
 	uint32_t			chunk_fourcc;	/* such as: 00dc, 00db, 00wb, etc. */
 	uint32_t			group0_len;
+	void*				vprp;		/* OpenDML video properties (vprp chunk contents), or NULL */
+	size_t				vprp_len;
 } avi_writer_stream;
 
 typedef struct avi_writer {
@@ -57,6 +59,7 @@ typedef struct avi_writer {
 
 int avi_writer_stream_check_samplecount(avi_writer_stream *s,unsigned int len);
 int avi_writer_stream_set_format(avi_writer_stream *s,void *data,size_t len);
+int avi_writer_stream_set_vprp(avi_writer_stream *s,const void *data,size_t len); /* call before avi_writer_begin_header(); len=0 removes it */
 riff_strh_AVISTREAMHEADER *avi_writer_stream_header(avi_writer_stream *s);
 riff_avih_AVIMAINHEADER *avi_writer_main_header(avi_writer *w);
 avi_writer_stream *avi_writer_new_stream(avi_writer *w); /* reminder: you are not required to free this pointer, the writer does it for you on close_file() */
