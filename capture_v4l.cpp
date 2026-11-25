@@ -197,6 +197,11 @@ static double			avi_audio_err = 0;
 static snd_pcm_hw_params_t*	alsa_hw_params = NULL;
 static snd_pcm_t*		alsa_pcm = NULL;
 
+/* audio monitor: play the captured audio out to a sound card while capturing */
+static bool			audio_monitor = false;			/* user wants to listen */
+static string			audio_monitor_device = "default";	/* ALSA playback device */
+static double			alsa_play_retry = 0;			/* do not retry a failed open before this time */
+
 static volatile int		DIE = 0;
 
 static FILE*			AVI_logfile = NULL;
@@ -1332,6 +1337,8 @@ static void help() {
 	fprintf(stderr,"    -index <N>                             Which Video4linux capture source to use\n");
 	fprintf(stderr,"    -path <path>                           Where to capture to\n");
 	fprintf(stderr,"    -audio-device <device>                 ALSA device to capture from or 'auto'\n");
+	fprintf(stderr,"    -monitor                               Play the captured audio to the monitor device\n");
+	fprintf(stderr,"    -monitor-device <device>               ALSA playback device for -monitor (default 'default')\n");
 	fprintf(stderr,"    -shm <name>                            Live feed shm name\n");
 	fprintf(stderr,"    -shm-size <n>                          Shared memory size (in MB)\n");
 	fprintf(stderr,"    -auto-open-avi <n>                     Whether to auto-open AVI output on V4L device\n");
@@ -1474,6 +1481,12 @@ static int parse_argv(int argc,char **argv) {
 			}
 			else if (!strcmp(a,"audio-device")) {
 				audio_device = argv[i++];
+			}
+			else if (!strcmp(a,"monitor")) {
+				audio_monitor = true;
+			}
+			else if (!strcmp(a,"monitor-device")) {
+				audio_monitor_device = argv[i++];
 			}
 			else if (!strcmp(a,"input-device")) {
 				input_device = argv[i++];
@@ -1661,10 +1674,252 @@ void capture_vbi_open(void) {
 	}
 }
 
+/* ------------------------------------------------------------------------------
+ * Audio monitor
+ *
+ * The captured audio is copied to an ALSA playback device so the user can listen
+ * for problems during capture. Recording never depends on it: the capture loop only
+ * copies samples into a small ring buffer (monitor_push, never blocks), and a
+ * separate thread writes them to the sound card. A sound server (PulseAudio's ALSA
+ * plugin) can stall for tens of milliseconds; that thread absorbs it.
+ *
+ * Capture and playback run on different clocks, and the capture side arrives in
+ * bursts. The ring holds at most 100 ms: when it is full the oldest samples are
+ * dropped, which bounds the latency. An underrun restarts playback after a short
+ * block of silence.
+ * ------------------------------------------------------------------------------ */
+static pthread_mutex_t		mon_mutex = PTHREAD_MUTEX_INITIALIZER;
+static pthread_cond_t		mon_cond = PTHREAD_COND_INITIALIZER;
+static pthread_t		mon_thread;
+static bool			mon_running = false;		/* thread exists (main thread's view) */
+static volatile bool		mon_quit = false;		/* ask the thread to stop */
+static volatile bool		mon_done = false;		/* thread has finished (e.g. open failed) */
+static volatile bool		mon_failed = false;		/* it finished because the device failed */
+static int16_t*			mon_ring = NULL;		/* audio waiting for the thread */
+static size_t			mon_ring_frames = 0;		/* ring capacity in frames */
+static size_t			mon_ring_head = 0;		/* next frame to write */
+static size_t			mon_ring_fill = 0;		/* frames queued */
+static int			mon_rate = 0,mon_channels = 0;
+static string			mon_device;
+static unsigned long long	mon_dropped = 0;		/* frames dropped to limit latency */
+static unsigned long		mon_underruns = 0;
+
+/* write about 1/4 of the device buffer as silence */
+static void monitor_prefill(snd_pcm_t *pcm,snd_pcm_uframes_t buffer) {
+	static int16_t silence[8 * 1024];
+	snd_pcm_uframes_t want = buffer / 4;
+	const snd_pcm_uframes_t chunk = sizeof(silence) / sizeof(int16_t) / (snd_pcm_uframes_t)std::max(mon_channels,1);
+
+	memset(silence,0,sizeof(silence));
+	while (want > 0 && !mon_quit) {
+		snd_pcm_uframes_t n = std::min(want,chunk);
+		if (snd_pcm_writei(pcm,silence,n) <= 0) break;
+		want -= n;
+	}
+}
+
+static void *monitor_thread_proc(void *arg) {
+	snd_pcm_t *pcm = NULL;
+	snd_pcm_uframes_t buffer = 0,period = 0;
+	int16_t *tmp = NULL;
+	size_t tmp_frames = 0;
+	bool need_prefill = true;
+	int err;
+
+	(void)arg;
+
+	if ((err = snd_pcm_open(&pcm, mon_device.c_str(), SND_PCM_STREAM_PLAYBACK, 0)) < 0) {
+		fprintf(stderr,"Audio monitor: cannot open ALSA playback device '%s', %s\n",mon_device.c_str(),snd_strerror(err));
+		pcm = NULL;
+		goto fail;
+	}
+
+	/* 100 ms device buffer, resampling allowed if the card cannot do the capture rate */
+	if ((err = snd_pcm_set_params(pcm, SND_PCM_FORMAT_S16_LE, SND_PCM_ACCESS_RW_INTERLEAVED,
+		(unsigned int)mon_channels, (unsigned int)mon_rate, 1, 100000)) < 0) {
+		fprintf(stderr,"Audio monitor: cannot set %dHz %d-channel S16LE on '%s', %s\n",
+			mon_rate,mon_channels,mon_device.c_str(),snd_strerror(err));
+		goto fail;
+	}
+	if ((err = snd_pcm_get_params(pcm, &buffer, &period)) < 0 || buffer == 0 || period == 0) {
+		fprintf(stderr,"Audio monitor: cannot read buffer size, %s\n",snd_strerror(err));
+		goto fail;
+	}
+
+	/* start playing once the pre-fill is in, not when the whole buffer is full */
+	{
+		snd_pcm_sw_params_t *sw = NULL;
+		if (snd_pcm_sw_params_malloc(&sw) == 0) {
+			if (snd_pcm_sw_params_current(pcm, sw) == 0 &&
+				snd_pcm_sw_params_set_start_threshold(pcm, sw, std::max(period,buffer / 4)) == 0)
+				snd_pcm_sw_params(pcm, sw);
+			snd_pcm_sw_params_free(sw);
+		}
+	}
+
+	fprintf(stderr,"Audio monitor: playing to '%s', %dHz, buffer %lu frames, period %lu frames\n",
+		mon_device.c_str(),mon_rate,(unsigned long)buffer,(unsigned long)period);
+
+	tmp_frames = period;
+	tmp = new int16_t[tmp_frames * (size_t)mon_channels];
+
+	/* the silence pre-fill goes in when audio is actually waiting (at start and after
+	 * an underrun), otherwise playback would start and immediately run dry */
+	need_prefill = true;
+
+	while (!mon_quit) {
+		size_t n = 0;
+
+		/* take up to one period from the ring */
+		pthread_mutex_lock(&mon_mutex);
+		while (mon_ring_fill == 0 && !mon_quit) {
+			struct timespec ts;
+			clock_gettime(CLOCK_REALTIME,&ts);
+			ts.tv_nsec += 100000000L;
+			if (ts.tv_nsec >= 1000000000L) { ts.tv_sec++; ts.tv_nsec -= 1000000000L; }
+			pthread_cond_timedwait(&mon_cond,&mon_mutex,&ts);
+		}
+		if (!mon_quit) {
+			size_t tail = (mon_ring_head + mon_ring_frames - mon_ring_fill) % mon_ring_frames;
+			n = std::min(mon_ring_fill,tmp_frames);
+			for (size_t i=0;i < n;i++) {
+				memcpy(tmp + (i * (size_t)mon_channels),mon_ring + (tail * (size_t)mon_channels),sizeof(int16_t) * (size_t)mon_channels);
+				if (++tail == mon_ring_frames) tail = 0;
+			}
+			mon_ring_fill -= n;
+		}
+		pthread_mutex_unlock(&mon_mutex);
+		if (mon_quit || n == 0) continue;
+
+		if (need_prefill) {
+			monitor_prefill(pcm,buffer);
+			need_prefill = false;
+		}
+
+		/* blocking write: this thread is paced by the sound card */
+		size_t done = 0;
+		while (done < n && !mon_quit) {
+			snd_pcm_sframes_t r = snd_pcm_writei(pcm, tmp + (done * (size_t)mon_channels), n - done);
+			if (r > 0) {
+				done += (size_t)r;
+			}
+			else if (r == -EPIPE) {
+				/* underrun: capture stalled or the card runs faster than the capture clock */
+				mon_underruns++;
+				update_now_time();
+				fprintf(stderr,"Audio monitor: underrun at %.3f\n",monoNOW);
+				snd_pcm_prepare(pcm);
+				monitor_prefill(pcm,buffer);
+			}
+			else if (r < 0 && snd_pcm_recover(pcm, (int)r, 1) < 0) {
+				fprintf(stderr,"Audio monitor: playback error %s, closing\n",snd_strerror((int)r));
+				goto fail;
+			}
+		}
+	}
+
+	snd_pcm_drop(pcm);
+	snd_pcm_close(pcm);
+	delete[] tmp;
+	mon_done = true;
+	return NULL;
+fail:
+	if (pcm != NULL) snd_pcm_close(pcm);
+	if (tmp != NULL) delete[] tmp;
+	mon_failed = true;
+	mon_done = true;
+	return NULL;
+}
+
+static void monitor_stop() {
+	if (!mon_running) return;
+
+	pthread_mutex_lock(&mon_mutex);
+	mon_quit = true;
+	pthread_cond_signal(&mon_cond);
+	pthread_mutex_unlock(&mon_mutex);
+	pthread_join(mon_thread,NULL);
+	mon_running = false;
+
+	if (mon_failed)
+		alsa_play_retry = monoNOW + 5.0;
+	else
+		fprintf(stderr,"Audio monitor closed (dropped %llu frames to limit latency, %lu underruns)\n",
+			mon_dropped,mon_underruns);
+
+	if (mon_ring != NULL) {
+		delete[] mon_ring;
+		mon_ring = NULL;
+	}
+	mon_ring_frames = mon_ring_fill = mon_ring_head = 0;
+}
+
+static void monitor_start() {
+	if (mon_running) return;
+	if (audio_rate <= 0 || audio_channels <= 0) return;
+	if (monoNOW < alsa_play_retry) return;
+
+	mon_rate = audio_rate;
+	mon_channels = audio_channels;
+	mon_device = audio_monitor_device;
+	mon_ring_frames = (size_t)audio_rate / 10; /* 100 ms */
+	mon_ring = new int16_t[mon_ring_frames * (size_t)audio_channels];
+	mon_ring_head = mon_ring_fill = 0;
+	mon_dropped = 0;
+	mon_underruns = 0;
+	mon_quit = false;
+	mon_done = false;
+	mon_failed = false;
+
+	if (pthread_create(&mon_thread,NULL,monitor_thread_proc,NULL) != 0) {
+		fprintf(stderr,"Audio monitor: cannot start thread\n");
+		delete[] mon_ring;
+		mon_ring = NULL;
+		alsa_play_retry = monoNOW + 5.0;
+		return;
+	}
+	mon_running = true;
+}
+
+/* bring the monitor in line with what the user wants (main thread) */
+static void monitor_update_state() {
+	if (mon_running && mon_done) /* the thread gave up (device error) */
+		monitor_stop();
+
+	if (audio_monitor && alsa_pcm != NULL)
+		monitor_start();
+	else
+		monitor_stop();
+}
+
+/* main thread: queue captured audio for the monitor. Never blocks on the sound card. */
+static void monitor_push(const int16_t *samples,size_t frames) {
+	if (!mon_running || mon_done || frames == 0) return;
+
+	pthread_mutex_lock(&mon_mutex);
+	if (frames > mon_ring_frames) { /* only the newest fit */
+		mon_dropped += frames - mon_ring_frames;
+		samples += (frames - mon_ring_frames) * (size_t)mon_channels;
+		frames = mon_ring_frames;
+	}
+	for (size_t i=0;i < frames;i++) {
+		memcpy(mon_ring + (mon_ring_head * (size_t)mon_channels),samples + (i * (size_t)mon_channels),sizeof(int16_t) * (size_t)mon_channels);
+		if (++mon_ring_head == mon_ring_frames) mon_ring_head = 0;
+	}
+	mon_ring_fill += frames;
+	if (mon_ring_fill > mon_ring_frames) { /* the oldest were overwritten */
+		mon_dropped += mon_ring_fill - mon_ring_frames;
+		mon_ring_fill = mon_ring_frames;
+	}
+	pthread_cond_signal(&mon_cond);
+	pthread_mutex_unlock(&mon_mutex);
+}
+
 void close_v4l() {
 	int i,x;
 
 	close_avi_file();
+	monitor_stop();
 
 	if (alsa_hw_params != NULL) {
 		snd_pcm_hw_params_free(alsa_hw_params);
@@ -2903,6 +3158,25 @@ void process_socket_io() {
 		v4l_contrast = (int)(atof(v) * 10000);
 		apply_v4l_controls();
 	}
+	else if (!strcmp(msg,"monitor-on")) {
+		audio_monitor = true;
+		alsa_play_retry = 0;
+		fprintf(stderr,"Audio monitor on\n");
+	}
+	else if (!strcmp(msg,"monitor-off")) {
+		audio_monitor = false;
+		monitor_stop();
+	}
+	else if (!strncmp(msg,"monitor-device ",15)) {
+		char *v = msg + 15;
+		while (*v == ' ') v++;
+		string dev = (*v != 0) ? v : "default";
+		if (dev != audio_monitor_device) {
+			audio_monitor_device = dev;
+			monitor_stop(); /* reopened on the new device if monitoring */
+			alsa_play_retry = 0;
+		}
+	}
 	else if (!strcmp(msg,"capture-on")) {
 		auto_v4l_v4l = true;
 	}
@@ -3537,6 +3811,9 @@ int main(int argc,char **argv) {
 			/* update time */
 			update_now_time();
 
+			/* open/close the audio monitor as requested */
+			monitor_update_state();
+
 			/* So ALSA, how much is waiting for us? */
 			err = snd_pcm_avail_delay(alsa_pcm, &avail, &delay);
 
@@ -3571,6 +3848,9 @@ int main(int argc,char **argv) {
 
                         audio_sum_count++;
                     }
+
+					// listen: copy to the monitor output (never blocks, drops if it cannot keep up)
+					monitor_push((const int16_t*)fmp4_temp,(size_t)done);
 
 					if (AVI) {
 						if (AVI_audio) {

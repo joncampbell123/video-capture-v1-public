@@ -172,6 +172,7 @@ public:
 	void start_recording();
 	void stop_recording();
 	void socket_command(const char *msg);
+	void update_monitor();
 	void increase_speed();
 	void decrease_speed();
 	bool start_process();
@@ -476,6 +477,7 @@ GtkWidget*			main_window_view_input_8 = NULL;
 GtkWidget*			main_window_toolbar_input_8 = NULL;
 
 GtkWidget*			main_window_view_osd = NULL;
+GtkWidget*			main_window_view_listen = NULL;
 
 GSList*				ui_notification_log = NULL;
 
@@ -493,6 +495,10 @@ int				ip_in_proto = IP_PROTO_RTP;
 bool				cfg_show_toolbar = true;
 bool				cfg_show_metadata = false;
 bool				cfg_show_status = true;
+
+/* Listen to Audio: play the current input's captured audio to the sound card */
+bool				cfg_audio_monitor = false;
+std::string			cfg_audio_monitor_device = "default";	/* ALSA playback device */
 
 void draw_osd();
 void client_area_free();
@@ -553,6 +559,10 @@ void load_config_section_ui(const char *name,const char *value) {
 		cfg_show_status = load_config_parse_boolean(value);
 	else if (!strcmp(name,"osd"))
 		user_enable_osd = load_config_parse_boolean(value);
+	else if (!strcmp(name,"listen"))
+		cfg_audio_monitor = load_config_parse_boolean(value);
+	else if (!strcmp(name,"listen device"))
+		cfg_audio_monitor_device = (*value != 0) ? value : "default";
 }
 
 int load_config_section_input_sel = -1;
@@ -789,6 +799,8 @@ void save_configuration() {
 	fprintf(fp,"metadata = %s\n",save_config_boolean(cfg_show_metadata));
 	fprintf(fp,"status = %s\n",save_config_boolean(cfg_show_status));
 	fprintf(fp,"osd = %s\n",save_config_boolean(user_enable_osd));
+	fprintf(fp,"listen = %s\n",save_config_boolean(cfg_audio_monitor));
+	fprintf(fp,"listen device = %s\n",cfg_audio_monitor_device.c_str());
 	fprintf(fp,"\n");
 
 	/* [xwindows] */
@@ -2694,6 +2706,11 @@ bool InputManager::start_process_video4linux() {
 	if (enable_audio) {
 		argv[argc++] = "--audio-device";
 		argv[argc++] = audio_device.empty() ? "auto" : audio_device.c_str();
+
+		argv[argc++] = "--monitor-device";
+		argv[argc++] = cfg_audio_monitor_device.c_str();
+		if (cfg_audio_monitor && index == CurrentInput)
+			argv[argc++] = "--monitor";
 	}
 
 	if (!input_device.empty()) {
@@ -2830,6 +2847,7 @@ void InputManager::idle() {
 					socket_fd = accept(socket_svr_fd,NULL,NULL);
 					if (socket_fd >= 0) {
 						fprintf(stderr,"Connected to capture program\n");
+						update_monitor(); /* in case Listen was toggled while it started */
 					}
 				}
 			}
@@ -3071,11 +3089,23 @@ void InputManager::socket_command(const char *msg) {
 	}
 }
 
+/* Listen to Audio follows the input being viewed: only the current input plays its audio */
+void InputManager::update_monitor() {
+	char tmp[300];
+
+	if (socket_fd < 0) return; /* not connected yet: the command line carries the state */
+
+	snprintf(tmp,sizeof(tmp),"monitor-device %s",cfg_audio_monitor_device.c_str());
+	socket_command(tmp);
+	socket_command((cfg_audio_monitor && index == CurrentInput) ? "monitor-on" : "monitor-off");
+}
+
 void InputManager::onActivate(bool on) {
 	if (on) {
 		if (cap_pid >= 0) { /* if the process already started */
 			if (socket_fd >= 0) {
 				socket_command("capture-on");
+				update_monitor();
 			}
 		}
 		else if (video_index >= 0) {
@@ -3085,7 +3115,13 @@ void InputManager::onActivate(bool on) {
 			}
 		}
 	}
-	else if (!Recording) {
+	else {
+		/* stop listening to an input we switch away from (it may keep recording) */
+		if (cap_pid >= 0 && socket_fd >= 0)
+			socket_command("monitor-off");
+	}
+
+	if (!on && !Recording) {
 		if (cap_pid >= 0 && socket_fd >= 0) {
 			socket_command("capture-off");
 		}
@@ -3131,6 +3167,27 @@ static void on_main_window_view_osd(GtkMenuItem *menuitem,const char *ui_mgr_pat
 		user_enable_osd = sel;
 		fprintf(stderr,"OSD turned %s\n",user_enable_osd?"on":"off");
 		gtk_check_menu_item_set_active (GTK_CHECK_MENU_ITEM(main_window_view_osd),user_enable_osd);
+	}
+}
+
+/* ----------------------- VIEW -> LISTEN TO AUDIO ----------------------- */
+static void on_main_window_view_listen(GtkMenuItem *menuitem,const char *ui_mgr_path) {
+	bool sel = (bool)gtk_check_menu_item_get_active (GTK_CHECK_MENU_ITEM(main_window_view_listen));
+	if (sel != cfg_audio_monitor) {
+		cfg_audio_monitor = sel;
+		fprintf(stderr,"Listen to audio turned %s\n",cfg_audio_monitor?"on":"off");
+
+		if (CurrentInput > VIEW_INPUT_OFF && Input[CurrentInput] != NULL) {
+			InputManager *in = CurrentInputObj();
+
+			in->update_monitor();
+			if (!cfg_audio_monitor)
+				osd_set_text_big("Listen: off");
+			else if (!in->enable_audio)
+				osd_set_text_big("Listen: audio capture is\nnot enabled for this input");
+			else
+				osd_set_text_big("Listen: on");
+		}
 	}
 }
 
@@ -5864,6 +5921,7 @@ static const gchar *ui_info =
 "	 <menuitem action='ViewMenuZebra_100'/>"
 "      </menu>"
 "      <menuitem action='ViewMenuOSD'/>"
+"      <menuitem action='ViewMenuListen'/>"
 "    </menu>"
 "    <menu action='ConfigMenu'>"
 "      <menuitem action='ConfigMenu_X'/>"
@@ -6274,6 +6332,13 @@ static int init_main_window()
 			G_CALLBACK(on_main_window_view_osd),
 			NULL);
 
+	/* Listen to Audio switch (Shift+L) */
+	tog_act = gtk_toggle_action_new ("ViewMenuListen", "_Listen to Audio", "Play the current input's audio to the sound card", NULL);
+	gtk_action_group_add_action_with_accel (action_group, GTK_ACTION(tog_act), "<Shift>L");
+	g_signal_connect(tog_act, "toggled",
+			G_CALLBACK(on_main_window_view_listen),
+			NULL);
+
 	main_window_ui_mgr = gtk_ui_manager_new();
 	g_object_set_data_full(G_OBJECT(main_window), "ui-manager", main_window_ui_mgr,
 			g_object_unref);
@@ -6506,6 +6571,10 @@ static int init_main_window()
 	tmp = gtk_ui_manager_get_widget (main_window_ui_mgr, "/MenuBar/ViewMenu/ViewMenuOSD");
 	main_window_view_osd = tmp;
 	gtk_check_menu_item_set_active_notoggle (GTK_CHECK_MENU_ITEM(tmp), user_enable_osd);
+
+	tmp = gtk_ui_manager_get_widget (main_window_ui_mgr, "/MenuBar/ViewMenu/ViewMenuListen");
+	main_window_view_listen = tmp;
+	gtk_check_menu_item_set_active_notoggle (GTK_CHECK_MENU_ITEM(tmp), cfg_audio_monitor);
 
 #ifdef GTK_HAS_INFO_BAR
 	if (gtk_widget_get_visible(main_window)) /* FIXME: When did this appear in the GTK+? */
