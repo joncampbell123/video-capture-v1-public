@@ -50,6 +50,8 @@ extern "C" {
 using namespace std;
 
 #include <list>
+#include <vector>
+#include <algorithm>
 #include <string>
 
 enum AVIPacketStream {
@@ -1588,19 +1590,42 @@ void capture_vbi_open(void) {
 
             sprintf(path,"/sys/class/video4linux/video%u/device/video4linux",v4l_index);
 
+            /* A device can have several video and VBI nodes (the Sensoray 2255 has four
+             * channels on one USB interface: video4-7 + vbi0-3), and readdir() order is
+             * arbitrary. Pair them by rank: the k-th videoN of the device (by N) goes
+             * with the k-th vbiN. With one video and one VBI node this is the old result. */
             if ((dir=opendir(path)) != NULL) {
+                std::vector<unsigned int> vids,vbis;
+
                 while ((d=readdir(dir)) != NULL) {
                     if (fstatat(dirfd(dir),d->d_name,&st,0)) /* if we can't stat it, we can't use it */
                         continue;
 
-                    /* we're looking for a directory named vbiX where X is an integer */
-                    if (!strncmp(d->d_name,"vbi",3) && isdigit(d->d_name[3])) {
-                        fprintf(stderr,"Found VBI device using sysfs. video%u -> %s\n",v4l_index,d->d_name);
-                        sprintf(tmp,"/dev/%s",d->d_name);
-                        break;
-                    }
+                    /* we're looking for directories named videoX and vbiX where X is an integer */
+                    if (!strncmp(d->d_name,"vbi",3) && isdigit(d->d_name[3]))
+                        vbis.push_back((unsigned int)strtoul(d->d_name+3,NULL,10));
+                    else if (!strncmp(d->d_name,"video",5) && isdigit(d->d_name[5]))
+                        vids.push_back((unsigned int)strtoul(d->d_name+5,NULL,10));
                 }
                 closedir(dir);
+
+                std::sort(vids.begin(),vids.end());
+                std::sort(vbis.begin(),vbis.end());
+
+                if (!vbis.empty()) {
+                    size_t rank = 0;
+
+                    for (size_t i=0;i < vids.size();i++) {
+                        if (vids[i] == v4l_index) {
+                            rank = i;
+                            break;
+                        }
+                    }
+                    if (rank >= vbis.size()) rank = 0;
+
+                    fprintf(stderr,"Found VBI device using sysfs. video%u -> vbi%u\n",v4l_index,vbis[rank]);
+                    sprintf(tmp,"/dev/vbi%u",vbis[rank]);
+                }
             }
         }
 

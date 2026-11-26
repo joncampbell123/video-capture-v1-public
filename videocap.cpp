@@ -2186,6 +2186,52 @@ static void vbi_view_update(InputManager *input,volatile struct live_shm_header 
 	client_area_draw_vbi();
 }
 
+/* USB bandwidth from the capture driver's sysfs files (bytes/second), if it has them
+ * (Sensoray 2255 sr2255 driver: bandwidth_required, bandwidth_in_use, bandwidth_max).
+ * Read at most twice a second. Returns false if the driver does not provide them. */
+static bool read_sysfs_u64(const char *path,unsigned long long &v) {
+	char tmp[64];
+	FILE *fp = fopen(path,"r");
+	bool ok = false;
+
+	if (fp != NULL) {
+		if (fgets(tmp,sizeof(tmp),fp) != NULL) {
+			char *e = NULL;
+			v = strtoull(tmp,&e,10);
+			ok = (e != tmp);
+		}
+		fclose(fp);
+	}
+
+	return ok;
+}
+
+static bool get_capture_bandwidth(int video_index,unsigned long long &req,unsigned long long &inuse,unsigned long long &max) {
+	static int last_index = -1;
+	static double last_time = -1;
+	static bool last_ok = false;
+	static unsigned long long l_req = 0,l_inuse = 0,l_max = 0;
+
+	if (video_index < 0) return false;
+
+	update_now_time();
+	if (video_index != last_index || last_time < 0 || NOW < last_time || (NOW - last_time) >= 0.5) {
+		char path[128];
+
+		last_index = video_index;
+		last_time = NOW;
+		snprintf(path,sizeof(path),"/sys/class/video4linux/video%d/bandwidth_required",video_index);
+		last_ok = read_sysfs_u64(path,l_req);
+		snprintf(path,sizeof(path),"/sys/class/video4linux/video%d/bandwidth_in_use",video_index);
+		last_ok = last_ok && read_sysfs_u64(path,l_inuse);
+		snprintf(path,sizeof(path),"/sys/class/video4linux/video%d/bandwidth_max",video_index);
+		last_ok = last_ok && read_sysfs_u64(path,l_max) && l_max != 0;
+	}
+
+	req = l_req; inuse = l_inuse; max = l_max;
+	return last_ok;
+}
+
 bool put_live_frame_on_screen(InputManager *input,bool force_redraw/*TODO*/) {
 	unsigned int field_order = ~0u;
 	int field = -1;
@@ -2350,6 +2396,23 @@ bool put_live_frame_on_screen(InputManager *input,bool force_redraw/*TODO*/) {
 		}
 
 		status += tmp;
+	}
+
+	{
+		unsigned long long req,inuse,max;
+
+		if (get_capture_bandwidth(input->video_index,req,inuse,max)) {
+			char tmp[128];
+
+			/* this input + other inputs of the device / device limit, MB/s;
+			 * over the limit means the device will drop frames */
+			snprintf(tmp,sizeof(tmp),"USB %.1f+%.1f/%.1f MB/s%s ",
+				(double)req / 1e6,
+				(double)(inuse > req ? inuse - req : 0ULL) / 1e6,
+				(double)max / 1e6,
+				inuse > max ? " OVER LIMIT, expect dropped frames" : "");
+			status += tmp;
+		}
 	}
 
 	if (input->vt_rec.video_rate_n > 0UL && input->vt_rec.video_rate_d > 0UL) {
