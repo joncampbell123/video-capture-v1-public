@@ -217,6 +217,9 @@ static FILE*			AVI_logfile = NULL;
 
 static int			vbi_fd = -1;
 static int			vbi_width,vbi_height,vbi_stride;
+/* height of the recorded VBI picture: 4:2:0 encoders need an even height (HD raw VBI has
+ * an odd line count, e.g. 720p lines 7-25 = 19): one black line added below */
+#define vbi_enc_height		(vbi_height + (vbi_height & 1))
 static bool			capture_vbi = false;
 static bool			capture_all_vbi = false;
 
@@ -916,11 +919,12 @@ static void open_avi_file() {
 		fmp4_vbi_context->keyint_min = AVI_FRAMES_PER_GROUP;
 		fmp4_vbi_context->time_base.num = v4l_framerate_d; /* NTS: ffmpeg means time interval as "amount of time between frames" */
 		fmp4_vbi_context->time_base.den = v4l_framerate_n;
-		fmp4_vbi_context->height = vbi_height;
+		fmp4_vbi_context->height = vbi_enc_height;
 		fmp4_vbi_context->width = vbi_width;
 		fmp4_vbi_context->gop_size = AVI_FRAMES_PER_GROUP;
 		fmp4_vbi_context->max_b_frames = 0; /* don't use B-frames */
-		fmp4_vbi_context->pix_fmt = AV_PIX_FMT_YUV420P;
+		/* HuffYUV has no 4:2:0 (huffyuv-422 + VBI failed with "Cannot open codec") */
+		fmp4_vbi_context->pix_fmt = (codec_id == AV_CODEC_ID_HUFFYUV) ? AV_PIX_FMT_YUV422P : AV_PIX_FMT_YUV420P;
 		fmp4_vbi_context->bit_rate_tolerance = fmp4_vbi_context->bit_rate / 2;
 #if LIBAVCODEC_VERSION_INT >= AV_VERSION_INT(59,18,100) /* FFMPEG 5.0.3+ */
 		/* no equivalent */
@@ -1142,11 +1146,11 @@ static void open_avi_file() {
 
 		AVI_vbi_video_fmt.biSize = sizeof(windows_BITMAPINFOHEADER);
 		AVI_vbi_video_fmt.biWidth = vbi_width;
-		AVI_vbi_video_fmt.biHeight = vbi_height;
+		AVI_vbi_video_fmt.biHeight = vbi_enc_height;
 		AVI_vbi_video_fmt.biPlanes = 1;
 		AVI_vbi_video_fmt.biBitCount = AVI_video_fmt.biBitCount;
 		AVI_vbi_video_fmt.biCompression = AVI_video_fmt.biCompression;
-		AVI_vbi_video_fmt.biSizeImage = vbi_width * vbi_height * 3;
+		AVI_vbi_video_fmt.biSizeImage = vbi_width * vbi_enc_height * 3;
 		AVI_vbi_video_fmt.biXPelsPerMeter = 0;
 		AVI_vbi_video_fmt.biYPelsPerMeter = 0;
 		AVI_vbi_video_fmt.biClrUsed = 0;
@@ -1183,10 +1187,10 @@ static void open_avi_file() {
 		strhdr->dwFlags =			0;
 		strhdr->dwScale =			v4l_framerate_d;
 		strhdr->dwRate =			v4l_framerate_n;
-		strhdr->dwSuggestedBufferSize =		vbi_width * vbi_height * 2;
+		strhdr->dwSuggestedBufferSize =		vbi_width * vbi_enc_height * 2;
 		strhdr->dwSampleSize =			0;
 		strhdr->rcFrame.right =			vbi_width;
-		strhdr->rcFrame.bottom =		vbi_height;
+		strhdr->rcFrame.bottom =		vbi_enc_height;
 	}
 
 	if (!avi_writer_begin_header(AVI)) {
@@ -1706,6 +1710,10 @@ void capture_vbi_open(void) {
 
 			vbi_width += 15;
 			vbi_width -= vbi_width % 16;
+			/* the 15.75 kHz estimate is for SD; HD raw VBI (component 720p/1080i: 74 MHz)
+			 * has fewer samples per line than that: never wider than the data */
+			if (vbi_width > vbi_stride)
+				vbi_width = vbi_stride;
 			fprintf(stderr,"VBI width %u stride %u height %u\n",
 				vbi_width,
 				vbi_stride,
@@ -1723,6 +1731,7 @@ void capture_vbi_open(void) {
 
 				assert(vbi_buffer == NULL);
 				vbi_buffer = new unsigned char [vbi_width * (vbi_height+64)];
+				memset(vbi_buffer,16,vbi_width * (vbi_height+64)); /* incl. the padding line (black) */
 				vbi_read_field = 0;
 			}
 		}
@@ -3703,7 +3712,13 @@ int main(int argc,char **argv) {
 				if (v4l_buf[v4l_bufptr].flags & V4L2_BUF_FLAG_DONE) {
 					if (ioctl(v4l_fd,VIDIOC_DQBUF,&v4l_buf[v4l_bufptr]) == 0) {
 						vb = &v4l_buf[v4l_bufptr];
-						ptr = v4l_ptr[v4l_bufptr];
+						/* DQBUF returns the oldest completed buffer, which is not
+						 * necessarily the one we asked about: use the one it returned
+						 * (the QBUF below requeues that one too) */
+						if (vb->index < (unsigned int)v4l_buffers)
+							ptr = v4l_ptr[vb->index];
+						else
+							ptr = v4l_ptr[v4l_bufptr];
 						if (vb->timestamp.tv_sec > 0 && AVI != NULL) {
 							/* NOTE: The Linux kernel API says the timestamp can come from the device,
 							 *       or from other parts of the Video4Linux API. It never said anything
@@ -4005,7 +4020,7 @@ int main(int argc,char **argv) {
 			av_frame->key_frame = (avi_vbi_frame_counter % AVI_FRAMES_PER_GROUP) == 0;
 			av_frame->pts = AV_NOPTS_VALUE;
 			av_frame->width = vbi_width;
-			av_frame->height = v4l_vbi_capfmt.fmt.vbi.count[0] + v4l_vbi_capfmt.fmt.vbi.count[1];
+			av_frame->height = vbi_enc_height;
 
 			if (fmp4_vbi_context != NULL)
 				av_frame->format = fmp4_vbi_context->pix_fmt;
@@ -4023,7 +4038,9 @@ int main(int argc,char **argv) {
 						memcpy(vbi_buffer+(dy*vbi_width),fmp4_temp+(sy*vbi_stride),cpy);
 					}
 
-					vbi_read_field ^= 1;
+					/* progressive (count[1] == 0): one read is the whole frame */
+					if (v4l_vbi_capfmt.fmt.vbi.count[1] != 0)
+						vbi_read_field ^= 1;
 					if (!vbi_read_field)
 						vbi_publish_live(); /* both fields in: show them in the GUI */
 
@@ -4032,8 +4049,8 @@ int main(int argc,char **argv) {
 						av_frame->data[0] = vbi_buffer;
 						av_frame->linesize[0] = vbi_width;
 
-						assert((vbi_width*vbi_height) <= sizeof(fmp4_yuv));
-						memset(fmp4_yuv,128,vbi_width*vbi_height);
+						assert((vbi_width*vbi_enc_height) <= sizeof(fmp4_yuv));
+						memset(fmp4_yuv,128,vbi_width*vbi_enc_height);
 
 						av_frame->data[1] = fmp4_yuv;
 						av_frame->linesize[1] = vbi_width >> 1;
