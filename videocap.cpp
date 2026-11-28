@@ -1479,6 +1479,13 @@ void InputManager::start_recording() {
 			ack = 0;
 			break;
 		}
+		else if (!strcmp(msg,"WAITING")) {
+			/* no signal: the capture program records as soon as the input has one
+			 * and then names the file with AVI-RESTART (idle_socket) */
+			ack = 1;
+			capture_avi = "";
+			break;
+		}
 	} while (1);
 
 	if (ack) {
@@ -1486,7 +1493,7 @@ void InputManager::start_recording() {
 		const char *s = strrchr(CurrentInputObj()->capture_avi.c_str(),'/');
 		if (s != NULL) s++;
 		else s = CurrentInputObj()->capture_avi.c_str();
-		tmp += s;
+		tmp += (*s != 0) ? s : "waiting for signal";
 		osd_set_text_big(tmp.c_str());
 	}
 	else {
@@ -2854,7 +2861,7 @@ void switch_input(int x) {
 					const char *s = strrchr(CurrentInputObj()->capture_avi.c_str(),'/');
 					if (s != NULL) s++;
 					else s = CurrentInputObj()->capture_avi.c_str();
-					tmp += string("\nRec: ") + string(s);
+					tmp += string("\nRec: ") + string(*s != 0 ? s : "waiting for signal");
 				}
 
 				osd_set_text_big(tmp.c_str());

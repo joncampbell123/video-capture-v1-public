@@ -3754,6 +3754,14 @@ void process_socket_io() {
 			/* TODO: Announce the audio format when the GUI supports audio playback */
 			announce_avi("OK");
 		}
+		else if (v4l_fd < 0) {
+			/* no signal (capture does not start): stay armed. The main loop retries the
+			 * capture every 2 s; when it starts, open_v4l() opens the AVI and announces
+			 * it to the GUI with AVI-RESTART (as after a format change) */
+			fprintf(stderr,"No signal: recording starts when capture does\n");
+			avi_restart_announce = true;
+			socket_MSG("WAITING\n");
+		}
 		else {
 			fprintf(stderr,"Failed to start recording.\n");
 			socket_MSG("FAILED");
