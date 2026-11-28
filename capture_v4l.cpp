@@ -28,6 +28,7 @@
 
 #include <alsa/asoundlib.h>	/* ALSA sound library */
 
+#include <poll.h>
 #include <linux/videodev2.h>	/* Linux Video4Linux 2 capture interface */
 
 #include "now.h"
@@ -37,6 +38,7 @@
 extern "C" {
 #include <libavutil/pixfmt.h>
 #include <libavcodec/avcodec.h>
+#include <libavutil/hwcontext.h>
 }
 
 /* comment out this define if your AVI files come out corrupt when stopping capture.
@@ -350,6 +352,20 @@ static string			live_shm_name;
 /* FFMPEG MPEG-4 encoder */
 static const AVCodec*		fmp4_codec=NULL;
 static AVCodecContext*		fmp4_context=NULL;
+/* libx264/libx265 copy the picture into their own frames inside avcodec_send_frame():
+ * hand them a reference-counted wrapper so libavcodec does not copy it first (a whole
+ * frame of av_image_copy per frame: ~250 MB/s at 1080p60 4:2:2) */
+static bool			fmp4_copies_input = false;
+static void			no_free(void *,uint8_t *) { }
+/* VAAPI hardware encoding (-codec h264-vaapi / h265-vaapi; Intel Quick Sync through libva):
+ * 4:2:0 (NV12 surfaces) only. Falls back to the software encoder when libavcodec has no
+ * VAAPI encoder or no render node works. */
+static string			vaapi_device_sel = "auto";	/* -vaapi-device: render node or "auto" */
+static AVBufferRef*		vaapi_device = NULL;		/* hw device, kept across files */
+static string			vaapi_device_path;
+static AVBufferRef*		vaapi_frames = NULL;		/* surface pool of the open encoder */
+static AVFrame*			vaapi_nv12 = NULL;		/* NV12 staging frame for the upload */
+static bool			fmp4_vaapi = false;		/* the open encoder is a VAAPI one */
 
 static const AVCodec*		fmp4_vbi_codec=NULL;
 static AVCodecContext*		fmp4_vbi_context=NULL;
@@ -568,9 +584,13 @@ static void close_avi_file() {
 	}
 	if (fmp4_context != NULL) {
 		avcodec_close(fmp4_context);
+		av_buffer_unref(&fmp4_context->hw_frames_ctx);
 		av_free(fmp4_context);
 		fmp4_context = NULL;
 	}
+	av_buffer_unref(&vaapi_frames);
+	av_frame_free(&vaapi_nv12);
+	fmp4_vaapi = false;
 }
 
 static unsigned int gcd_u(unsigned int a,unsigned int b) {
@@ -649,6 +669,97 @@ static bool write_video_vprp(avi_writer_stream *s) {
 	return avi_writer_stream_set_vprp(s,tmp,sizeof(*h) + (fields * sizeof(*fd))) != 0;
 }
 
+/* VAAPI device: -vaapi-device, or the first render node that opens (a card may have
+ * several: Intel + another GPU) */
+static bool vaapi_open_device(void) {
+	if (vaapi_device != NULL)
+		return true;
+
+	std::vector<string> nodes;
+	if (vaapi_device_sel != "auto" && vaapi_device_sel != "")
+		nodes.push_back(vaapi_device_sel);
+	else
+		for (unsigned int n=128;n < 136;n++)
+			nodes.push_back("/dev/dri/renderD" + std::to_string(n));
+
+	for (size_t i=0;i < nodes.size();i++) {
+		struct stat st;
+
+		if (stat(nodes[i].c_str(),&st) != 0) continue;
+		if (av_hwdevice_ctx_create(&vaapi_device,AV_HWDEVICE_TYPE_VAAPI,nodes[i].c_str(),NULL,0) == 0) {
+			vaapi_device_path = nodes[i];
+			fprintf(stderr,"VAAPI: device %s\n",nodes[i].c_str());
+			return true;
+		}
+		fprintf(stderr,"VAAPI: %s does not open\n",nodes[i].c_str());
+	}
+	return false;
+}
+
+/* NV12 surface pool at the capture size + the staging frame */
+static bool vaapi_make_frames(void) {
+	AVHWFramesContext *fc;
+
+	av_buffer_unref(&vaapi_frames);
+	av_frame_free(&vaapi_nv12);
+	if ((vaapi_frames = av_hwframe_ctx_alloc(vaapi_device)) == NULL)
+		return false;
+	fc = (AVHWFramesContext*)vaapi_frames->data;
+	fc->format = AV_PIX_FMT_VAAPI;
+	fc->sw_format = AV_PIX_FMT_NV12;
+	fc->width = v4l_width;
+	fc->height = v4l_height;
+	fc->initial_pool_size = 16;
+	if (av_hwframe_ctx_init(vaapi_frames) < 0) {
+		fprintf(stderr,"VAAPI: no %ux%u NV12 surfaces: software encoding\n",v4l_width,v4l_height);
+		av_buffer_unref(&vaapi_frames);
+		return false;
+	}
+	vaapi_nv12 = av_frame_alloc();
+	vaapi_nv12->format = AV_PIX_FMT_NV12;
+	vaapi_nv12->width = v4l_width;
+	vaapi_nv12->height = v4l_height;
+	if (av_frame_get_buffer(vaapi_nv12,64) < 0) {
+		av_frame_free(&vaapi_nv12);
+		av_buffer_unref(&vaapi_frames);
+		return false;
+	}
+	return true;
+}
+
+/* planar 4:2:0 frame (the live feed / encoder input) -> NV12 -> a VAAPI surface; the
+ * returned frame goes to avcodec_send_frame() instead of the planar one */
+static AVFrame *vaapi_upload(const AVFrame *src) {
+	AVFrame *hw;
+	int y,x;
+
+	if (av_frame_make_writable(vaapi_nv12) < 0)
+		return NULL;
+	for (y=0;y < src->height;y++)
+		memcpy(vaapi_nv12->data[0] + (size_t)y * vaapi_nv12->linesize[0],
+			src->data[0] + (size_t)y * src->linesize[0],(size_t)src->width);
+	for (y=0;y < (src->height >> 1);y++) {
+		const unsigned char *u = src->data[1] + (size_t)y * src->linesize[1];
+		const unsigned char *v = src->data[2] + (size_t)y * src->linesize[2];
+		unsigned char *d = vaapi_nv12->data[1] + (size_t)y * vaapi_nv12->linesize[1];
+
+		for (x=0;x < (src->width >> 1);x++) {
+			d[2*x] = u[x];
+			d[2*x+1] = v[x];
+		}
+	}
+	if ((hw = av_frame_alloc()) == NULL)
+		return NULL;
+	if (av_hwframe_get_buffer(vaapi_frames,hw,0) < 0 ||
+		av_hwframe_transfer_data(hw,vaapi_nv12,0) < 0) {
+		av_frame_free(&hw);
+		return NULL;
+	}
+	hw->pts = src->pts;
+	hw->key_frame = src->key_frame;
+	return hw;
+}
+
 static void open_avi_file() {
     AVCodecID codec_id = AV_CODEC_ID_H264;
 	riff_avih_AVIMAINHEADER *mainhdr;
@@ -674,9 +785,11 @@ static void open_avi_file() {
 	v4l_last_frame_delta = 0;
 	v4l_last_vbi_delta = 0;
 
-	if (want_codec_sel == "h265" || want_codec_sel == "h265-422")
+	const bool want_vaapi = (want_codec_sel == "h264-vaapi" || want_codec_sel == "h265-vaapi");
+
+	if (want_codec_sel == "h265" || want_codec_sel == "h265-422" || want_codec_sel == "h265-vaapi")
 		codec_id = AV_CODEC_ID_H265;
-	else if (want_codec_sel == "h264" || want_codec_sel == "h264-422")
+	else if (want_codec_sel == "h264" || want_codec_sel == "h264-422" || want_codec_sel == "h264-vaapi")
 		codec_id = AV_CODEC_ID_H264;
 	else if (want_codec_sel == "mpeg4" || want_codec_sel == "mpeg4-422")
 		codec_id = AV_CODEC_ID_MPEG4;
@@ -689,8 +802,27 @@ static void open_avi_file() {
 	else if (want_codec_sel == "utvideo" || want_codec_sel == "utvideo-422")
 		codec_id = AV_CODEC_ID_UTVIDEO;
 
+	fmp4_vaapi = false;
+	if (want_vaapi && vaapi_open_device()) {
+		const AVCodec *c = avcodec_find_encoder_by_name(codec_id == AV_CODEC_ID_H265 ? "hevc_vaapi" : "h264_vaapi");
+
+		if (c == NULL)
+			fprintf(stderr,"VAAPI: this libavcodec has no %s encoder: software encoding\n",
+				codec_id == AV_CODEC_ID_H265 ? "hevc_vaapi" : "h264_vaapi");
+		else if (vaapi_make_frames()) {
+			fmp4_codec = c;
+			fmp4_vaapi = true;
+		}
+	}
+	else if (want_vaapi) {
+		fprintf(stderr,"VAAPI: no usable render node: software encoding\n");
+	}
+	if (!fmp4_vaapi && fmp4_codec != NULL && strstr(fmp4_codec->name,"_vaapi") != NULL)
+		fmp4_codec = NULL;	/* was VAAPI for the previous file */
 	if (fmp4_codec == NULL) {
-		if ((fmp4_codec = avcodec_find_encoder(codec_id)) == NULL) {
+		if ((fmp4_codec = avcodec_find_encoder(codec_id)) != NULL)
+			fmp4_copies_input = !strcmp(fmp4_codec->name,"libx264") || !strcmp(fmp4_codec->name,"libx265");
+		if (fmp4_codec == NULL) {
 			fprintf(stderr,"FFMPEG error, cannot find H.264 encoder\n");
 			close_avi_file();
 			return;
@@ -786,7 +918,12 @@ static void open_avi_file() {
 	fmp4_context->gop_size = AVI_FRAMES_PER_GROUP;
 	fmp4_context->max_b_frames = 0; /* don't use B-frames */
 
-	if (v4l_codec_yshr == 0)
+	if (fmp4_vaapi) {
+		fmp4_context->pix_fmt = AV_PIX_FMT_VAAPI;
+		fmp4_context->hw_frames_ctx = av_buffer_ref(vaapi_frames);
+		fmp4_context->rc_max_rate = fmp4_context->bit_rate;
+	}
+	else if (v4l_codec_yshr == 0)
 		fmp4_context->pix_fmt = jpeg_yuv ? AV_PIX_FMT_YUVJ422P : AV_PIX_FMT_YUV422P;
 	else
 		fmp4_context->pix_fmt = jpeg_yuv ? AV_PIX_FMT_YUVJ420P : AV_PIX_FMT_YUV420P;
@@ -825,7 +962,12 @@ static void open_avi_file() {
 	fmp4_context->thread_type |= FF_THREAD_FRAME;
 //	fmp4_context->flags2 |= CODEC_FLAG2_FAST;
 //	fmp4_context->flags |= CODEC_FLAG_LOW_DELAY;
-	if (effective_v4l_interlaced() >= 0) {
+	if (effective_v4l_interlaced() >= 0 && fmp4_vaapi) {
+		/* the VAAPI encoders code frames only: interlaced sources are encoded as
+		 * woven frames (the AVI vprp chunk still says interlaced) */
+		fmp4_context->field_order = AV_FIELD_PROGRESSIVE;
+	}
+	else if (effective_v4l_interlaced() >= 0) {
 		fmp4_context->flags |= AV_CODEC_FLAG_INTERLACED_DCT;
 		fmp4_context->field_order = (effective_v4l_interlaced() == 0) ? AV_FIELD_TT : AV_FIELD_BB;
 
@@ -841,7 +983,11 @@ static void open_avi_file() {
 
 	fprintf(stderr,"Encoder using %u threads\n",how_many_cpus());
 
-    if (codec_id == AV_CODEC_ID_H264 || codec_id == AV_CODEC_ID_H265) {
+    if (fmp4_vaapi) {
+        av_dict_set(&opt_dict,"profile",codec_id == AV_CODEC_ID_H265 ? "main" : "high",0);
+        av_dict_set(&opt_dict,"rc_mode","VBR",0);
+    }
+    else if (codec_id == AV_CODEC_ID_H264 || codec_id == AV_CODEC_ID_H265) {
         av_dict_set(&opt_dict,"rc-lookahead","10",0); /* NTS: If latency is a problem, reduce this value */
 
         if (v4l_codec_yshr == 0 && codec_id == AV_CODEC_ID_H264)
@@ -878,13 +1024,16 @@ static void open_avi_file() {
     }
 
 	if (avcodec_open2(fmp4_context,fmp4_codec,&opt_dict)) {
-		fprintf(stderr,"Cannot open codec\n");
+		fprintf(stderr,"Cannot open codec%s\n",fmp4_vaapi ? " (VAAPI: try -vaapi-device, or a software codec)" : "");
 		av_dict_free(&opt_dict);
 		close_avi_file();
 		return;
 	}
 
 	av_dict_free(&opt_dict);
+	if (fmp4_vaapi)
+		fprintf(stderr,"VAAPI: encoding with %s on %s (%ux%u NV12)\n",fmp4_codec->name,
+			vaapi_device_path.c_str(),v4l_width,v4l_height);
 	update_now_time();
 	avi_audio_samples = 0;
 	avi_frame_counter = 0;
@@ -895,7 +1044,9 @@ static void open_avi_file() {
 	avi_file = capture_path + tmp;
 
 	if (capture_vbi && vbi_fd >= 0) {
-		if (fmp4_vbi_codec == NULL) {
+		if (fmp4_vbi_codec != NULL && strstr(fmp4_vbi_codec->name,"_vaapi") != NULL)
+		fmp4_vbi_codec = NULL;
+	if (fmp4_vbi_codec == NULL) {
 			if ((fmp4_vbi_codec = avcodec_find_encoder(codec_id)) == NULL) {
 				fprintf(stderr,"FFMPEG error, cannot find H.264 encoder\n");
 				close_avi_file();
@@ -1385,6 +1536,7 @@ static void help() {
 	fprintf(stderr,"    -cy <n>                                Top crop rect coordinate\n");
 	fprintf(stderr,"    -cw <n>                                Width crop rect coordinate\n");
 	fprintf(stderr,"    -ch <n>                                Height crop rect coordinate\n");
+	fprintf(stderr,"    -vaapi-device <path|auto>              VAAPI render node for the -vaapi codecs (default auto)\n");
 	fprintf(stderr,"    -codec <n>                             Codec.\n");
 	fprintf(stderr,"                                                 mpeg2         MPEG-2 4:2:0\n");
 	fprintf(stderr,"                                                 mpeg2-422     MPEG-2 4:2:2\n");
@@ -1394,6 +1546,8 @@ static void help() {
 	fprintf(stderr,"                                                 h264-422      H.264/AVC 4:2:2\n");
 	fprintf(stderr,"                                                 h265          H.265/HEVC 4:2:0\n");
 	fprintf(stderr,"                                                 h265-422      H.265/HEVC 4:2:2\n");
+	fprintf(stderr,"                                                 h264-vaapi    H.264/AVC 4:2:0, VAAPI hardware (Quick Sync)\n");
+	fprintf(stderr,"                                                 h265-vaapi    H.265/HEVC 4:2:0, VAAPI hardware\n");
 	fprintf(stderr,"                                                 huffyuv       HuffYUV 4:2:0\n");
 	fprintf(stderr,"                                                 huffyuv-422   HuffYUV 4:2:2\n");
 	fprintf(stderr,"                                                 utvideo       Ut Video 4:2:0\n");
@@ -1479,6 +1633,9 @@ static int parse_argv(int argc,char **argv) {
 			else if (!strcmp(a,"codec")) {
 				want_codec_sel = argv[i++];
             }
+			else if (!strcmp(a,"vaapi-device")) {
+				vaapi_device_sel = argv[i++];
+			}
             else if (!strcmp(a,"swap-fields")) {
                 swap_fields = true;
             }
@@ -3096,6 +3253,17 @@ static bool format_changed(void) {
 
 	if (watch_format_events) {
 		struct v4l2_event ev;
+		struct pollfd pfd;
+
+		/* poll() first: an event is pending only when it reports POLLPRI. Calling
+		 * VIDIOC_DQEVENT every loop iteration took the driver's device lock each time,
+		 * which pexhd's input monitor holds through its I2C reads (~100 ms twice a
+		 * second): the capture loop stalled and fell behind at 1080p60. */
+		pfd.fd = v4l_fd;
+		pfd.events = POLLPRI;
+		pfd.revents = 0;
+		if (poll(&pfd,1,0) <= 0 || !(pfd.revents & POLLPRI))
+			return false;
 
 		do {
 			memset(&ev,0,sizeof(ev));
@@ -3183,6 +3351,60 @@ static void field_layout(unsigned int fc,unsigned int srcs,unsigned int hh,unsig
 	*dst_y = y;
 }
 
+/* one row of packed 4:2:2 (UYVY or YUYV) -> planar Y, U, V */
+static void row_422_c(const unsigned char *src,unsigned char *Y,unsigned char *U,unsigned char *V,unsigned int w,bool uyvy) {
+	const unsigned int yo = uyvy ? 1 : 0,uo = uyvy ? 0 : 1,vo = uyvy ? 2 : 3;
+
+	for (unsigned int x=0;x < w;x += 2) {
+		Y[0] = src[yo];
+		Y[1] = src[yo+2];
+		*U++ = src[uo];
+		*V++ = src[vo];
+		src += 4;
+		Y += 2;
+	}
+}
+
+#if defined(__x86_64__) || defined(__i386__)
+#include <tmmintrin.h>
+
+/* SSSE3: 16 pixels (32 bytes) per step; at 1080p60 the plain loop took a large share of
+ * the capture thread */
+__attribute__((target("ssse3")))
+static void row_422_ssse3(const unsigned char *src,unsigned char *Y,unsigned char *U,unsigned char *V,unsigned int w,bool uyvy) {
+	const __m128i sy = uyvy ?
+		_mm_setr_epi8(1,3,5,7,9,11,13,15,-1,-1,-1,-1,-1,-1,-1,-1) :
+		_mm_setr_epi8(0,2,4,6,8,10,12,14,-1,-1,-1,-1,-1,-1,-1,-1);
+	const __m128i sc = uyvy ?	/* U0..U3 V0..V3 */
+		_mm_setr_epi8(0,4,8,12,2,6,10,14,-1,-1,-1,-1,-1,-1,-1,-1) :
+		_mm_setr_epi8(1,5,9,13,3,7,11,15,-1,-1,-1,-1,-1,-1,-1,-1);
+	unsigned int x = 0;
+
+	for (;(x+16) <= w;x += 16) {
+		const __m128i a = _mm_loadu_si128((const __m128i*)src);
+		const __m128i b = _mm_loadu_si128((const __m128i*)(src+16));
+		const __m128i yy = _mm_unpacklo_epi64(_mm_shuffle_epi8(a,sy),_mm_shuffle_epi8(b,sy));
+		const __m128i uv = _mm_unpacklo_epi32(_mm_shuffle_epi8(a,sc),_mm_shuffle_epi8(b,sc)); /* Ua Ub Va Vb */
+
+		_mm_storeu_si128((__m128i*)Y,yy);
+		_mm_storel_epi64((__m128i*)U,uv);
+		_mm_storel_epi64((__m128i*)V,_mm_srli_si128(uv,8));
+		src += 32; Y += 16; U += 8; V += 8;
+	}
+	if (x < w) row_422_c(src,Y,U,V,w-x,uyvy);
+}
+
+static void row_422(const unsigned char *src,unsigned char *Y,unsigned char *U,unsigned char *V,unsigned int w,bool uyvy) {
+	static int have_ssse3 = -1;
+
+	if (have_ssse3 < 0) have_ssse3 = __builtin_cpu_supports("ssse3") ? 1 : 0;
+	if (have_ssse3) row_422_ssse3(src,Y,U,V,w,uyvy);
+	else row_422_c(src,Y,U,V,w,uyvy);
+}
+#else
+#define row_422 row_422_c
+#endif
+
 void copy_yuyv_to_planar_yuv_422(unsigned char *framep[3],int stride[3],unsigned char *sdi) {
 	unsigned int render_height = v4l_height & (~7);
 	unsigned int srcs = v4l_width*2;
@@ -3207,15 +3429,7 @@ void copy_yuyv_to_planar_yuv_422(unsigned char *framep[3],int stride[3],unsigned
 				Y = framep[0] + ( (y+0)       * stride[0]);
 				U = framep[1] + ( (y+0)       * stride[1]);
 				V = framep[2] + ( (y+0)       * stride[2]);
-				for (x=0;x < (unsigned int)v4l_width;x += 2) {
-					/* Y U Y V */
-					Y[0] = src[0];
-					Y[1] = src[2];
-					*U++ = src[1];
-					*V++ = src[3];
-					src += 4;
-					Y += 2;
-				}
+				row_422(src,Y,U,V,(unsigned int)v4l_width,false);
 			}
 		}
 	}
@@ -3231,15 +3445,7 @@ void copy_yuyv_to_planar_yuv_422(unsigned char *framep[3],int stride[3],unsigned
 			else
 				src = (unsigned char*)sdi + ((y+0) * srcs);
 
-			for (x=0;x < (unsigned int)v4l_width;x += 2) {
-				/* Y U Y V */
-				Y[0] = src[0];
-				Y[1] = src[2];
-				*U++ = src[1];
-				*V++ = src[3];
-				src += 4;
-				Y += 2;
-			}
+			row_422(src,Y,U,V,(unsigned int)v4l_width,false);
 		}
 	}
 }
@@ -3268,15 +3474,7 @@ void copy_uyvy_to_planar_yuv_422(unsigned char *framep[3],int stride[3],unsigned
 				Y = framep[0] + ( (y+0)       * stride[0]);
 				U = framep[1] + ( (y+0)       * stride[1]);
 				V = framep[2] + ( (y+0)       * stride[2]);
-				for (x=0;x < (unsigned int)v4l_width;x += 2) {
-					/* U Y V Y */
-					Y[0] = src[1];
-					Y[1] = src[3];
-					*U++ = src[0];
-					*V++ = src[2];
-					src += 4;
-					Y += 2;
-				}
+				row_422(src,Y,U,V,(unsigned int)v4l_width,true);
 			}
 		}
 	}
@@ -3292,15 +3490,7 @@ void copy_uyvy_to_planar_yuv_422(unsigned char *framep[3],int stride[3],unsigned
 			else
 				src = (unsigned char*)sdi + ((y+0) * srcs);
 
-			for (x=0;x < (unsigned int)v4l_width;x += 2) {
-				/* U Y V Y */
-				Y[0] = src[1];
-				Y[1] = src[3];
-				*U++ = src[0];
-				*V++ = src[2];
-				src += 4;
-				Y += 2;
-			}
+			row_422(src,Y,U,V,(unsigned int)v4l_width,true);
 		}
 	}
 
@@ -3330,15 +3520,7 @@ void copy_yuyv_to_planar_yuv_420(unsigned char *framep[3],int stride[3],unsigned
 				Y = framep[0] + ( (y+0)       * stride[0]);
 				U = framep[1] + (((y+1) >> 1) * stride[1]);
 				V = framep[2] + (((y+1) >> 1) * stride[2]);
-				for (x=0;x < (unsigned int)v4l_width;x += 2) {
-					/* Y U Y V */
-					Y[0] = src[0];
-					Y[1] = src[2];
-					*U++ = src[1];
-					*V++ = src[3];
-					src += 4;
-					Y += 2;
-				}
+				row_422(src,Y,U,V,(unsigned int)v4l_width,false);
 
 				src = srf; srf += src_step;
 				Y = framep[0] + ( (y+2)       * stride[0]);
@@ -3359,15 +3541,7 @@ void copy_yuyv_to_planar_yuv_420(unsigned char *framep[3],int stride[3],unsigned
 			U = framep[1] + (((y+0) >> 1) * stride[1]);
 			V = framep[2] + (((y+0) >> 1) * stride[2]);
 			src = (unsigned char*)sdi + ((y+0) * srcs);
-			for (x=0;x < (unsigned int)v4l_width;x += 2) {
-				/* Y U Y V */
-				Y[0] = src[0];
-				Y[1] = src[2];
-				*U++ = src[1];
-				*V++ = src[3];
-				src += 4;
-				Y += 2;
-			}
+			row_422(src,Y,U,V,(unsigned int)v4l_width,false);
 
 			Y = framep[0] + ( (y+1)       * stride[0]);
 			src = (unsigned char*)sdi + ((y+1) * srcs);
@@ -3406,15 +3580,7 @@ void copy_uyvy_to_planar_yuv_420(unsigned char *framep[3],int stride[3],unsigned
 				Y = framep[0] + ( (y+0)       * stride[0]);
 				U = framep[1] + (((y+1) >> 1) * stride[1]);
 				V = framep[2] + (((y+1) >> 1) * stride[2]);
-				for (x=0;x < (unsigned int)v4l_width;x += 2) {
-					/* U Y V Y */
-					Y[0] = src[1];
-					Y[1] = src[3];
-					*U++ = src[0];
-					*V++ = src[2];
-					src += 4;
-					Y += 2;
-				}
+				row_422(src,Y,U,V,(unsigned int)v4l_width,true);
 
 				src = srf; srf += src_step;
 				Y = framep[0] + ( (y+2)       * stride[0]);
@@ -3435,15 +3601,7 @@ void copy_uyvy_to_planar_yuv_420(unsigned char *framep[3],int stride[3],unsigned
 			U = framep[1] + (((y+0) >> 1) * stride[1]);
 			V = framep[2] + (((y+0) >> 1) * stride[2]);
 			src = (unsigned char*)sdi + ((y+0) * srcs);
-			for (x=0;x < (unsigned int)v4l_width;x += 2) {
-				/* U Y V Y */
-				Y[0] = src[1];
-				Y[1] = src[3];
-				*U++ = src[0];
-				*V++ = src[2];
-				src += 4;
-				Y += 2;
-			}
+			row_422(src,Y,U,V,(unsigned int)v4l_width,true);
 
 			Y = framep[0] + ( (y+1)       * stride[0]);
 			src = (unsigned char*)sdi + ((y+1) * srcs);
@@ -3923,7 +4081,16 @@ int main(int argc,char **argv) {
 						//      and it will ignore our pointers passed in. FFMPEG 4.4.x also has this API.
 						rd = -1;
 						av_frame->pts = avi_frame_counter;
-						if (avcodec_send_frame(fmp4_context,av_frame) >= 0) {
+						AVFrame *hw_frame = NULL;
+						if (fmp4_vaapi) {
+							if ((hw_frame = vaapi_upload(av_frame)) == NULL)
+								fprintf(stderr,"VAAPI: upload of frame %llu failed\n",avi_frame_counter);
+						}
+						else if (fmp4_copies_input && av_frame->buf[0] == NULL)
+							av_frame->buf[0] = av_buffer_create(av_frame->data[0],
+								(int)(v4l_width_stride * v4l_height * 2),no_free,NULL,0);
+						if ((!fmp4_vaapi || hw_frame != NULL) &&
+							avcodec_send_frame(fmp4_context,hw_frame ? hw_frame : av_frame) >= 0) {
 							rd = 0;
 							if (avcodec_receive_packet(fmp4_context,pkt) >= 0) {
 								rd = pkt->size;
@@ -3970,6 +4137,7 @@ int main(int argc,char **argv) {
 
 						av_packet_unref(pkt);
 						av_packet_free(&pkt);
+						av_frame_free(&hw_frame);
 						avi_frame_counter++;
 					}
 				}
@@ -4136,8 +4304,13 @@ int main(int argc,char **argv) {
 				else if (rd >= 0) {
 					fprintf(stderr,"VBI unexpected read=%d expect=%d\n",rd,expect);
 				}
-				else {
-					fprintf(stderr,"VBI read error %s\n",strerror(errno));
+				else if (errno != EINTR) {
+					/* the driver cannot deliver VBI for this input (pexhd: HDMI, VGA, 1080p:
+					 * ENOLINK). Retrying every loop iteration only costs time in the
+					 * driver: stop VBI until capture is reopened (format change, reopen) */
+					fprintf(stderr,"VBI read error %s: VBI off until capture restarts\n",strerror(errno));
+					close(vbi_fd);
+					vbi_fd = -1;
 				}
 			}
 			else {
