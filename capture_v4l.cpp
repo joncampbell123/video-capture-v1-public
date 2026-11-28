@@ -188,6 +188,12 @@ static struct v4l2_capability	v4l_vbi_cap;
 static struct v4l2_format	v4l_vbi_capfmt;
 
 static bool                 jpeg_yuv = false;
+/* -watch-format: restart capture (and the AVI file) when the input format changes */
+static bool			watch_format = false;
+static bool			watch_format_events = false;	/* driver sends V4L2_EVENT_SOURCE_CHANGE */
+static double			watch_format_next_check = 0;
+static struct v4l2_pix_format	watch_format_pix;		/* format capture was started with */
+static bool			avi_restart_announce = false;	/* tell the GUI about the new AVI */
 
 static unsigned char*		vbi_buffer = NULL;		/* [vbi_width * vbi_height] */
 static unsigned int		vbi_read_field = 0;
@@ -1396,6 +1402,7 @@ static void help() {
 	fprintf(stderr,"    -vbi-first <x>                         Open VBI first, then init video (1=yes 0=no -1=auto)\n");
 	fprintf(stderr,"    -no-vbi-sysfs                          Don't use sysfs to find vbi device\n");
 	fprintf(stderr,"    -fps <n>                               Capture fps\n");
+	fprintf(stderr,"    -watch-format                          Restart capture (and the AVI file) when the input format changes\n");
 	fprintf(stderr,"    -jpeg-yuv                              YUV is JPEG scale (0-255), else broadcast (16-235)\n");
 	fprintf(stderr,"    -swap-fields                           Swap fields, broken capture cards\n");
 	fprintf(stderr,"    -fil <top|bottom|p>                    Force field order in case the capture card fails to report it properly\n");
@@ -1445,6 +1452,9 @@ static int parse_argv(int argc,char **argv) {
 			}
 			else if (!strcmp(a,"jpeg-yuv")) {
 				jpeg_yuv = true;
+			}
+			else if (!strcmp(a,"watch-format")) {
+				watch_format = true;
 			}
 			else if (!strcmp(a,"no-vbi-sysfs")) {
 				v4l_vbi_via_sysfs = false;
@@ -2089,6 +2099,27 @@ static string alsa_device_for_v4l(const char *devname) {
 		snprintf(tmp,sizeof(tmp),"plughw:%d,%d",best_card,best_pcm);
 
 	return string(tmp);
+}
+
+void socket_MSG(const char *msg);
+
+/* "OK" (reply to record-on) or "AVI-RESTART" (new file after a format change) */
+static void announce_avi(const char *head) {
+	char msg[4096];
+
+	snprintf(msg,sizeof(msg),
+		"%s\n"
+		"File:%s\n"
+		"VidCodec:MPEG4\n"
+		"VidSize:%ux%u\n"
+		"VidRate:%u/%u\n"
+		"StartTime:%.3f\n",
+		head,
+		avi_file.c_str()/*FILE*/,
+		v4l_width,v4l_height/*VidSize*/,
+		v4l_framerate_n,v4l_framerate_d/*VidRate*/,
+		avi_file_start_time/*StartTime*/);
+	socket_MSG(msg);
 }
 
 void close_v4l() {
@@ -2743,8 +2774,10 @@ int open_v4l() {
 			memset(&prm,0,sizeof(prm));
 			prm.type = V4L2_BUF_TYPE_VIDEO_CAPTURE;
 			if (ioctl(v4l_fd,VIDIOC_G_PARM,&prm)) {
-				fprintf(stderr,"Unable to get parameters, %s\n",strerror(errno));
-				goto fail;
+				/* not every driver has it (pexhd before 2026-11-27): keep the rate guessed above */
+				fprintf(stderr,"Unable to get parameters, %s: keeping %u/%u fps\n",strerror(errno),
+					v4l_framerate_n,v4l_framerate_d);
+				goto parm_done;
 			}
 
 			fprintf(stderr,"----current params----\n");
@@ -2774,8 +2807,10 @@ int open_v4l() {
 			memset(&prm,0,sizeof(prm));
 			prm.type = V4L2_BUF_TYPE_VIDEO_CAPTURE;
 			if (ioctl(v4l_fd,VIDIOC_G_PARM,&prm)) {
-				fprintf(stderr,"Unable to get parameters, %s\n",strerror(errno));
-				goto fail;
+				/* not every driver has it (pexhd before 2026-11-27): keep the rate guessed above */
+				fprintf(stderr,"Unable to get parameters, %s: keeping %u/%u fps\n",strerror(errno),
+					v4l_framerate_n,v4l_framerate_d);
+				goto parm_done;
 			}
 
 			/* if we can, read back what the capture card says is the frame rate */
@@ -2799,6 +2834,7 @@ int open_v4l() {
 				(unsigned long)v4l_framerate_d,
 				(double)v4l_framerate_n / v4l_framerate_d);
 		}
+parm_done:
 
 		/* set up mapping */
 		for (i=0;i < v4l_buffers;i++) {
@@ -3008,11 +3044,95 @@ int open_v4l() {
 
 	apply_v4l_controls();
 
-	if (auto_v4l_avi && v4l_fd >= 0) open_avi_file();
+	if (watch_format && v4l_fd >= 0) {
+		struct v4l2_event_subscription sub;
+		struct v4l2_format f;
+		int inp = 0;
+
+		/* the format capture runs with, for drivers without source change events */
+		memset(&f,0,sizeof(f));
+		f.type = V4L2_BUF_TYPE_VIDEO_CAPTURE;
+		if (ioctl(v4l_fd,VIDIOC_G_FMT,&f) == 0)
+			watch_format_pix = f.fmt.pix;
+		else
+			memset(&watch_format_pix,0,sizeof(watch_format_pix));
+		watch_format_next_check = NOW + 1;
+
+		memset(&sub,0,sizeof(sub));
+		sub.type = V4L2_EVENT_SOURCE_CHANGE;
+		if (ioctl(v4l_fd,VIDIOC_G_INPUT,&inp) == 0)
+			sub.id = (uint32_t)inp;
+		watch_format_events = ioctl(v4l_fd,VIDIOC_SUBSCRIBE_EVENT,&sub) == 0;
+		fprintf(stderr,"Watching for format changes (%s)\n",
+			watch_format_events ? "source change events" : "no events from the driver: checking the format every second");
+	}
+
+	if (auto_v4l_avi && v4l_fd >= 0) {
+		open_avi_file();
+		if (avi_restart_announce && AVI != NULL) {
+			announce_avi("AVI-RESTART");
+			avi_restart_announce = false;
+		}
+	}
 	return 0;
 fail:
 	close_v4l();
 	return 1;
+}
+
+/* -watch-format: has the input format changed? (V4L2_EVENT_SOURCE_CHANGE, or for drivers
+ * without events a different G_FMT once a second) */
+static bool format_changed(void) {
+	bool changed = false;
+
+	if (watch_format_events) {
+		struct v4l2_event ev;
+
+		do {
+			memset(&ev,0,sizeof(ev));
+			if (ioctl(v4l_fd,VIDIOC_DQEVENT,&ev) != 0) break; /* ENOENT: none pending */
+			if (ev.type == V4L2_EVENT_SOURCE_CHANGE) {
+				fprintf(stderr,"Source change event (changes=0x%x)\n",ev.u.src_change.changes);
+				changed = true;
+			}
+		} while (ev.pending > 0);
+	}
+	else if (NOW >= watch_format_next_check) {
+		struct v4l2_format f;
+
+		watch_format_next_check = NOW + 1;
+		memset(&f,0,sizeof(f));
+		f.type = V4L2_BUF_TYPE_VIDEO_CAPTURE;
+		if (ioctl(v4l_fd,VIDIOC_G_FMT,&f) == 0 && watch_format_pix.width != 0 &&
+			(f.fmt.pix.width != watch_format_pix.width ||
+			 f.fmt.pix.height != watch_format_pix.height ||
+			 f.fmt.pix.field != watch_format_pix.field ||
+			 f.fmt.pix.pixelformat != watch_format_pix.pixelformat)) {
+			fprintf(stderr,"Format changed: %ux%u field %u -> %ux%u field %u\n",
+				watch_format_pix.width,watch_format_pix.height,watch_format_pix.field,
+				f.fmt.pix.width,f.fmt.pix.height,f.fmt.pix.field);
+			changed = true;
+		}
+	}
+
+	return changed;
+}
+
+/* stop capture (and the AVI), read the new format, start again (with a new AVI file if
+ * one was being recorded). If the new signal is not usable yet, the main loop retries
+ * every 2 seconds and the AVI starts once capture does. */
+static void restart_for_format_change(void) {
+	const bool was_recording = (AVI != NULL);
+
+	fprintf(stderr,"Input format changed: restarting capture%s\n",
+		was_recording ? " and the AVI file" : "");
+	close_v4l();
+	avi_restart_announce = was_recording && auto_v4l_avi;
+	v4l_device_retry = NOW + 2;
+	if (open_v4l() != 0)
+		fprintf(stderr,"New format not available yet, retrying\n");
+	else
+		fprintf(stderr,"Capture restarted at %ux%u\n",v4l_width,v4l_height);
 }
 
 void copy_grey_to_planar_y(unsigned char *framep[3],int stride[3],unsigned char *sdi) {
@@ -3346,6 +3466,7 @@ void socket_index_msg(const char *typ,unsigned long long frame,unsigned long lon
 }
 
 void socket_MSG(const char *msg) {
+	if (comm_socket_fd < 0) return; /* no GUI (run from the command line) */
 	while (send(comm_socket_fd,msg,strlen(msg),0) < 0) usleep(10000);
 }
 
@@ -3402,20 +3523,10 @@ void process_socket_io() {
 		v4l_open_shut_up = 0;
 		if (v4l_fd < 0) open_v4l();
 		if (v4l_fd >= 0) open_avi_file();
+		avi_restart_announce = false;	/* this reply announces it */
 		if (AVI != NULL) {
 			/* TODO: Announce the audio format when the GUI supports audio playback */
-			sprintf(msg,
-				"OK\n"
-				"File:%s\n"
-				"VidCodec:MPEG4\n"
-				"VidSize:%ux%u\n"
-				"VidRate:%u/%u\n"
-				"StartTime:%.3f\n",
-				avi_file.c_str()/*FILE*/,
-				v4l_width,v4l_height/*VidSize*/,
-				v4l_framerate_n,v4l_framerate_d/*VidRate*/,
-				avi_file_start_time/*StartTime*/);
-			socket_MSG(msg);
+			announce_avi("OK");
 		}
 		else {
 			fprintf(stderr,"Failed to start recording.\n");
@@ -3424,6 +3535,7 @@ void process_socket_io() {
 	}
 	else if (!strcmp(msg,"record-off")) {
 		auto_v4l_avi = false;
+		avi_restart_announce = false;
 		close_avi_file();
 	}
 	else {
@@ -3568,6 +3680,9 @@ int main(int argc,char **argv) {
 
 		if (v4l_fd >= 0 && !auto_v4l_v4l && !auto_v4l_avi)
 			close_v4l();
+
+		if (v4l_fd >= 0 && watch_format && format_changed())
+			restart_for_format_change();
 
 		if (v4l_fd < 0) {
 			if (NOW >= v4l_device_retry && (auto_v4l_v4l || auto_v4l_avi)) {

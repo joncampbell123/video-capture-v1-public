@@ -233,6 +233,7 @@ public:
 	bool				crop_bounds;
 	bool				crop_defrect;
 	bool				swap_fields;
+	bool				watch_format;	/* restart capture on input format changes */
 	int				force_interlace = -2;
 	bool				jpeg_yuv;
 	bool				async_io;
@@ -334,6 +335,7 @@ GtkWidget*			input_dialog_def_crop = NULL;
 GtkWidget*			input_dialog_bounds_crop = NULL;
 GtkWidget*          		input_dialog_async_io = NULL;
 GtkWidget*			input_dialog_swap_fields = NULL;
+GtkWidget*			input_dialog_watch_format = NULL;
 GtkWidget*			input_dialog_jpeg_yuv = NULL;
 GtkWidget*			input_dialog_brightness = NULL;
 GtkWidget*			input_dialog_contrast = NULL;
@@ -622,6 +624,8 @@ void load_config_section_input(const char *name,const char *value) {
 		iobj->async_io = atoi(value) > 0;
 	else if (!strcmp(name,"swap fields"))
 		iobj->swap_fields = atoi(value) > 0;
+	else if (!strcmp(name,"watch format changes"))
+		iobj->watch_format = atoi(value) > 0;
 	else if (!strcmp(name,"force interlace"))
 		iobj->force_interlace = atoi(value);
 	else if (!strcmp(name,"jpeg yuv"))
@@ -851,6 +855,7 @@ void save_configuration() {
 			fprintf(fp,"vcr hack = %s\n",iobj->vcrhack.c_str());
 			fprintf(fp,"force interlace = %d\n",iobj->force_interlace);
 			fprintf(fp,"swap fields = %d\n",iobj->swap_fields);
+			fprintf(fp,"watch format changes = %d\n",iobj->watch_format);
 			fprintf(fp,"jpeg yuv = %d\n",iobj->jpeg_yuv);
 			fprintf(fp,"async io = %d\n",iobj->async_io);
 			fprintf(fp,"zebra = %d\n",iobj->zebra);
@@ -3068,6 +3073,9 @@ bool InputManager::start_process_video4linux() {
 	if (swap_fields)
 		argv[argc++] = "--swap-fields";
 
+	if (watch_format)
+		argv[argc++] = "--watch-format";
+
 	if (jpeg_yuv)
 		argv[argc++] = "--jpeg-yuv";
 
@@ -3274,6 +3282,54 @@ bool InputManager::idle_socket() {
 						vt_rec.video_total_frames = frame;
 				}
 			}
+			else if (!strcmp(sock_msg_tmp,"AVI-RESTART") && n != NULL) {
+				/* the capture program restarted capture after an input format change
+				 * and records into a new AVI file now */
+				int width = -1,height = -1,raten = -1,rated = -1;
+				double start_time = -1;
+				string file;
+
+				while (*n != 0) {
+					char *nn = strchr(n,'\n'),*value;
+					if (nn) *nn++ = 0;
+					else nn = n + strlen(n);
+
+					while (*n == ' ') n++;
+					value = strchr(n,':');
+					if (value) {
+						*value++ = 0;
+						if (!strcasecmp(n,"file"))
+							file = value;
+						else if (!strcasecmp(n,"vidsize"))
+							sscanf(value," %dx%d",&width,&height);
+						else if (!strcasecmp(n,"vidrate"))
+							sscanf(value," %d/%d",&raten,&rated);
+						else if (!strcasecmp(n,"starttime"))
+							start_time = atof(value);
+					}
+					n = nn;
+				}
+
+				if (Recording && file != "") {
+					fprintf(stderr,"Format change: recording continues in '%s' (%dx%d)\n",
+						file.c_str(),width,height);
+					vt_rec.clear();
+					capture_avi = file;
+					vt_rec.video_width = width >= 32 ? width : 320;
+					vt_rec.video_height = height >= 32 ? height : 240;
+					vt_rec.video_rate_n = raten > 0 ? raten : 1;
+					vt_rec.video_rate_d = rated > 0 ? rated : 1;
+					vt_rec.video_total_frames = 0LL;
+					vt_rec.video_first_frame = -1LL;
+					vt_rec.start_time = start_time >= 0 ? start_time : NOW;
+
+					string tmp = string(osd_name) + "\nRec: ";
+					const char *s = strrchr(capture_avi.c_str(),'/');
+					tmp += (s != NULL) ? s + 1 : capture_avi.c_str();
+					if (this == CurrentInputObj())
+						osd_set_text_big(tmp.c_str());
+				}
+			}
 			else {
 				fprintf(stderr,"Unknown msg '%s'\n",sock_msg_tmp);
 			}
@@ -3337,6 +3393,7 @@ InputManager::InputManager(int input_index) {
 	capture_height = 0;
 	capture_fps = 0;
 	swap_fields = false;
+	watch_format = true;
 	jpeg_yuv = false;
 	crop_defrect = false;
 	crop_bounds = false;
@@ -4124,6 +4181,7 @@ static void update_input_dialog_from_vars() {
 	gtk_toggle_button_set_active (GTK_TOGGLE_BUTTON(input_dialog_bounds_crop), CurrentInputObj()->crop_bounds);
 	gtk_toggle_button_set_active (GTK_TOGGLE_BUTTON(input_dialog_async_io), CurrentInputObj()->async_io);
 	gtk_toggle_button_set_active (GTK_TOGGLE_BUTTON(input_dialog_swap_fields), CurrentInputObj()->swap_fields);
+	gtk_toggle_button_set_active (GTK_TOGGLE_BUTTON(input_dialog_watch_format), CurrentInputObj()->watch_format);
 	gtk_toggle_button_set_active (GTK_TOGGLE_BUTTON(input_dialog_jpeg_yuv), CurrentInputObj()->jpeg_yuv);
 
 	/* video index select */
@@ -4330,6 +4388,10 @@ static bool update_vars_from_input_dialog() {
 	tmp = gtk_toggle_button_get_active (GTK_TOGGLE_BUTTON(input_dialog_swap_fields)) > 0;
 	if (tmp != CurrentInputObj()->swap_fields) do_reopen = true;
 	CurrentInputObj()->swap_fields = tmp;
+
+	tmp = gtk_toggle_button_get_active (GTK_TOGGLE_BUTTON(input_dialog_watch_format)) > 0;
+	if (tmp != CurrentInputObj()->watch_format) do_reopen = true;
+	CurrentInputObj()->watch_format = tmp;
 
 	tmp = gtk_toggle_button_get_active (GTK_TOGGLE_BUTTON(input_dialog_jpeg_yuv)) > 0;
 	if (tmp != CurrentInputObj()->jpeg_yuv) do_reopen = true;
@@ -5170,6 +5232,14 @@ void create_input_dialog() {
 
 	input_dialog_jpeg_yuv = gtk_check_button_new_with_label ("JPEG range YUV");
 	gtk_container_add (GTK_CONTAINER(hbox), input_dialog_jpeg_yuv);
+
+	gtk_container_add (GTK_CONTAINER(vbox), hbox);
+
+
+	hbox = gtk_hbox_new (FALSE, 0);
+
+	input_dialog_watch_format = gtk_check_button_new_with_label ("Restart capture when the input format changes (new AVI file)");
+	gtk_container_add (GTK_CONTAINER(hbox), input_dialog_watch_format);
 
 	gtk_container_add (GTK_CONTAINER(vbox), hbox);
 
