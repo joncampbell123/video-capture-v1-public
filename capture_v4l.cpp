@@ -357,6 +357,36 @@ static AVCodecContext*		fmp4_context=NULL;
  * frame of av_image_copy per frame: ~250 MB/s at 1080p60 4:2:2) */
 static bool			fmp4_copies_input = false;
 static void			no_free(void *,uint8_t *) { }
+
+/* frame field/key information: FFmpeg 6.1+ (libavutil 58.7) has bits in AVFrame.flags,
+ * the old fields are deprecated and go away in FFmpeg 8 (libavutil 60). Set what the
+ * headers have: newer encoders read the bits, older ones the fields. */
+static void frame_set_info(AVFrame *f,bool interlaced,bool tff,bool key) {
+#ifdef AV_FRAME_FLAG_INTERLACED
+	f->flags &= ~(AV_FRAME_FLAG_INTERLACED | AV_FRAME_FLAG_TOP_FIELD_FIRST | AV_FRAME_FLAG_KEY);
+	if (interlaced) f->flags |= AV_FRAME_FLAG_INTERLACED;
+	if (tff) f->flags |= AV_FRAME_FLAG_TOP_FIELD_FIRST;
+	if (key) f->flags |= AV_FRAME_FLAG_KEY;
+#endif
+#pragma GCC diagnostic push
+#pragma GCC diagnostic ignored "-Wdeprecated-declarations"
+#if !defined(FF_API_INTERLACED_FRAME) || FF_API_INTERLACED_FRAME
+	f->interlaced_frame = interlaced ? 1 : 0;
+	f->top_field_first = tff ? 1 : 0;
+#endif
+#if !defined(FF_API_FRAME_KEY) || FF_API_FRAME_KEY
+	f->key_frame = key ? 1 : 0;
+#endif
+#pragma GCC diagnostic pop
+}
+
+static bool frame_is_key(const AVFrame *f) {
+#ifdef AV_FRAME_FLAG_KEY
+	return (f->flags & AV_FRAME_FLAG_KEY) != 0;
+#else
+	return f->key_frame != 0;
+#endif
+}
 /* VAAPI hardware encoding (-codec h264-vaapi / h265-vaapi; Intel Quick Sync through libva):
  * 4:2:0 (NV12 surfaces) only. Falls back to the software encoder when libavcodec has no
  * VAAPI encoder or no render node works. */
@@ -577,17 +607,10 @@ static void close_avi_file() {
 		AVI_video = NULL;
 		avi_file = "";
 	}
-	if (fmp4_vbi_context != NULL) {
-		avcodec_close(fmp4_vbi_context);
-		av_free(fmp4_vbi_context);
-		fmp4_vbi_context = NULL;
-	}
-	if (fmp4_context != NULL) {
-		avcodec_close(fmp4_context);
-		av_buffer_unref(&fmp4_context->hw_frames_ctx);
-		av_free(fmp4_context);
-		fmp4_context = NULL;
-	}
+	/* avcodec_free_context: closes, frees (incl. hw_frames_ctx) and sets NULL;
+	 * avcodec_close() is deprecated in FFmpeg 7 */
+	avcodec_free_context(&fmp4_vbi_context);
+	avcodec_free_context(&fmp4_context);
 	av_buffer_unref(&vaapi_frames);
 	av_frame_free(&vaapi_nv12);
 	fmp4_vaapi = false;
@@ -756,7 +779,7 @@ static AVFrame *vaapi_upload(const AVFrame *src) {
 		return NULL;
 	}
 	hw->pts = src->pts;
-	hw->key_frame = src->key_frame;
+	frame_set_info(hw,false,false,frame_is_key(src));	/* VAAPI: frames only */
 	return hw;
 }
 
@@ -3933,9 +3956,8 @@ int main(int argc,char **argv) {
 
 				AVFrame *av_frame = av_frame_alloc();
 
-				av_frame->top_field_first = (effective_v4l_interlaced() == 0) ? 1 : 0;
-				av_frame->interlaced_frame = (effective_v4l_interlaced() >= 0);
-				av_frame->key_frame = (avi_frame_counter % AVI_FRAMES_PER_GROUP) == 0;
+				frame_set_info(av_frame,effective_v4l_interlaced() >= 0,effective_v4l_interlaced() == 0,
+					(avi_frame_counter % AVI_FRAMES_PER_GROUP) == 0);
 				av_frame->pts = AV_NOPTS_VALUE;
 				av_frame->width = v4l_width;
 				av_frame->height = v4l_height;
@@ -4185,7 +4207,7 @@ int main(int argc,char **argv) {
 			int rd,expect;
 
 			av_frame = av_frame_alloc();
-			av_frame->key_frame = (avi_vbi_frame_counter % AVI_FRAMES_PER_GROUP) == 0;
+			frame_set_info(av_frame,false,false,(avi_vbi_frame_counter % AVI_FRAMES_PER_GROUP) == 0);
 			av_frame->pts = AV_NOPTS_VALUE;
 			av_frame->width = vbi_width;
 			av_frame->height = vbi_enc_height;
