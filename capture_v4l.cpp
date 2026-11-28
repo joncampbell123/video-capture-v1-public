@@ -1163,6 +1163,19 @@ static void open_avi_file() {
 		fprintf(AVI_logfile,"Capture started %s",ctime(&n)); /* ctime() ends with newline */
 		fprintf(AVI_logfile,"Capture is %u x %u with audio at %uHz %u-channel\n",
 			v4l_width,v4l_height,audio_rate,audio_channels);
+
+		/* HDMI: the source's InfoFrame data (what HDMI has instead of VBI), if the
+		 * driver provides it (pexhd: sysfs hdmi_info) */
+		char ipath[128],line[256];
+		FILE *ifp;
+
+		snprintf(ipath,sizeof(ipath),"/sys/class/video4linux/video%u/device/hdmi_info",v4l_index);
+		if ((ifp = fopen(ipath,"r")) != NULL) {
+			while (fgets(line,sizeof(line),ifp) != NULL)
+				if (strncmp(line,"not on HDMI",11) != 0)	/* component/VGA input */
+					fprintf(AVI_logfile,"HDMI %s",line);
+			fclose(ifp);
+		}
 	}
 
 	AVI_video_fmt.biXPelsPerMeter = 0;
@@ -1913,6 +1926,29 @@ void capture_vbi_open(void) {
 				vbi_buffer = new unsigned char [vbi_width * (vbi_height+64)];
 				memset(vbi_buffer,16,vbi_width * (vbi_height+64)); /* incl. the padding line (black) */
 				vbi_read_field = 0;
+
+				/* Can the driver deliver VBI for this input at all? The first read starts
+				 * VBI streaming: EAGAIN = running, no data yet. An error (pexhd: ENOLINK on
+				 * HDMI, VGA, 1080p) means no VBI: close it now, before the AVI gets an
+				 * empty VBI stream that makes the log look like VBI lost sync. */
+				const unsigned int expect = vbi_stride * v4l_vbi_capfmt.fmt.vbi.count[0];
+				const int rd = expect != 0 ? (int)read(vbi_fd,fmp4_temp,expect) : -1;
+
+				if (rd < 0 && errno != EAGAIN && errno != EINTR) {
+					fprintf(stderr,"VBI not available for this input (%s): recording without VBI\n",strerror(errno));
+					delete[] vbi_buffer;
+					vbi_buffer = NULL;
+					close(vbi_fd);
+					vbi_fd = -1;
+				}
+				else if (rd == (int)expect) {
+					/* data already: it is field 1 (or the whole progressive frame) */
+					for (unsigned int sy=0;sy < v4l_vbi_capfmt.fmt.vbi.count[0];sy++)
+						memcpy(vbi_buffer+(sy*vbi_width),fmp4_temp+(sy*vbi_stride),
+							std::min((unsigned int)vbi_stride,(unsigned int)vbi_width));
+					if (v4l_vbi_capfmt.fmt.vbi.count[1] != 0)
+						vbi_read_field = 1;
+				}
 			}
 		}
 	}
